@@ -28,6 +28,12 @@ struct SerVI {
 	RPOCO(ints);
 };
 
+struct SerPVI {
+	std::vector<int> *ints=0;
+	
+	RPOCO(ints);
+};
+
 template <typename T>
 struct roundtrip {
 	roundtrip(std::string in) {
@@ -52,6 +58,8 @@ int main(int argc,char **argv) {
 	roundtrip<Ser2P>("{\"sub\":{\"x\":34},\"a\":12}");
 
 	roundtrip<SerVI>("{\"ints\":[1,23,456,78,9]}");
+	roundtrip<SerPVI>("{\"ints\":null}");
+	roundtrip<SerPVI>("{\"ints\":[1,23,456,78,9]}");
 
 	Ser1 s1;
 	s1.x=1;

@@ -14,6 +14,8 @@ namespace rpocojson {
 			bool ok=true;
 			std::string tmp;
 
+			bool pendingNull=false;
+
 			json_parser(std::istream &ins) {
 				this->ins=&ins;
 			}
@@ -24,7 +26,6 @@ namespace rpocojson {
 			
 			virtual bool visit_start(rpoco::visit_type vt) {
 				skip();
-				printf("VISITSOME start:%d\n",vt);
 				switch(vt) {
 				case rpoco::object:
 					ok&=ins->get()=='{';
@@ -38,8 +39,30 @@ namespace rpocojson {
 			virtual void visit_end(rpoco::visit_type vt) {
 				abort(); // should not be called
 			}
+			virtual bool has_data() {
+				if (pendingNull)
+					return false;
+				if (!ok)
+					return false;
+				skip();
+				if (ins->peek()!='n') {
+					return ok;
+				}
+				ok&=ins->get()=='n';
+				ok&=ins->get()=='u';
+				ok&=ins->get()=='l';
+				pendingNull=(ok&(ins->peek()=='l'));
+				return ok && !pendingNull;
+			}
 			virtual void visit_null() {
-				printf("visitnull\n");
+				if (!pendingNull) {
+					skip();
+					ok&=ins->get()=='n';
+					ok&=ins->get()=='u';
+					ok&=ins->get()=='l';
+				}
+				ok&=ins->get()=='l';
+				pendingNull=false;
 			}
 			virtual void visit_end(rpoco::visit_type vt,std::function<void (std::string&)> g) {
 				//printf("VISITSOME end:%d %c\n",vt,ins->peek());
@@ -96,7 +119,6 @@ namespace rpocojson {
 			}
 			virtual void visit(std::string &str) {
 				skip();
-				printf("VISITSTR %c\n",ins->peek());
 				ok&=ins->get()=='"';
 				if (!ok) return;
 				while(ok) {
@@ -109,12 +131,11 @@ namespace rpocojson {
 						break;
 					str.push_back((char)c);
 				}
-				printf("ComplStr:%s\n",str.c_str());
 			}
 		};
 		
 		json_parser parser(in);
-		rpoco::visit(parser,&x);
+		rpoco::visit<X>(parser,&x);
 		return parser.ok;
 	}
 	template<typename X> bool parse(std::string &str,X &x) {
@@ -220,30 +241,18 @@ namespace rpocojson {
 				out.append("\"");
 				post();
 			}
+			virtual bool has_data() {
+				return false;
+			}
 			virtual void visit_null() {
 				pre(false);
 				out.append("null");
 				post();
 			}
-//			virtual void visit(rpoco::field_provider *ti,void *p) {
-//				if (!p) {
-//					pre(false);
-//					out.append("null");
-//					post();
-//					return;
-//				}
-//				if (visit_start(rpoco::object)) {
-//					for (int i=0;i<ti->size();i++) {
-//						visit((*ti)[i]->name());
-//						(*ti)[i]->visit(*this,p);
-//					}
-//				}
-//				visit_end(rpoco::object,[](std::string &x){});
-//			}
 		};
 		json_writer writer;
 
-		rpoco::visit(writer,x);
+		rpoco::visit<X>(writer,x);
 		return writer.out;
 	}
 }

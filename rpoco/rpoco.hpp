@@ -71,6 +71,7 @@ namespace rpoco {
 		virtual void visit(int& x)=0;
 		virtual void visit(std::string &k)=0;
 		virtual void visit_null()=0;
+		virtual bool has_data()=0;
 		//virtual void visit(field_provider *ti,void *p)=0;
 	};
 
@@ -94,7 +95,8 @@ namespace rpoco {
 	};
 
 	template<typename F>
-	void visit(visitor &v,F* f) {
+	struct visit {
+	visit(visitor &v,F* f) {
 		if (f) {
 			field_provider *fp=f->rpoco_type_info_get();
 			if (v.visit_start(object)) {
@@ -107,7 +109,6 @@ namespace rpoco {
 				v.visit_end(object,[&v,fp,f](std::string& n){
 					if (! fp->has(n))
 						return;
-					printf("HasProp:%s\n",n.c_str());
 					(*fp)[n]->visit(v,f);
 				});
 			}
@@ -116,26 +117,50 @@ namespace rpoco {
 		}
 		//v.visit(f?f->rpoco_type_info_get():0,f);
 	}
+	};
+
+	template<typename F>
+	struct visit<std::vector<F>> { visit(visitor &v,std::vector<F> *vp) {
+		if (!vp) {
+			v.visit_null();
+			return;
+		}
+		if (v.visit_start(array)) {
+			// serialization
+			for (F &f:*vp) {
+				rpoco::visit<F>(v,&f);
+			}
+			v.visit_end(array);
+		} else {
+			v.visit_end(array,[&v,vp](std::string& x) {
+				// deserialization
+				vp->emplace_back();
+				rpoco::visit<F>(v,&(vp->back()));
+			});
+		}
+	}};
 
 	template<>
-	void visit<int>(visitor &v,int* ip) {
+	struct visit<int> { visit (visitor &v,int* ip) {
 		if (ip) { v.visit(*ip); } else { v.visit_null(); }
 	}
+	};
 
 	template<>
-	void visit<std::string>(visitor &v,std::string* str) {
+	struct visit<std::string> { visit(visitor &v,std::string* str) {
 		if (str) { v.visit(*str); } else { v.visit_null(); }
-	}
+	}};
 
 	template<typename F>
 	class field : public fieldbase {
 	public:
 		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
 		virtual void visit(visitor &v,void *p) {
-			rpoco::visit(v,(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ));
+			rpoco::visit<F>(v,(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ));
 		}
 	};
 
+/*
 	template<typename F>
 	class field<std::map<std::string,F>> : public fieldbase {
 	public:
@@ -156,36 +181,18 @@ namespace rpoco {
 			v.visit_end(object_end,[](x){});
 		}
 	};
-
-	template<typename F>
-	class field<std::vector<F>> : public fieldbase {
-	public:
-		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
-		virtual void visit(visitor &v,void *p) {
-			std::vector<F> *vp=(std::vector<F>*)( (uintptr_t)p+(ptrdiff_t)m_offset );
-			if (v.visit_start(array)) {
-				// serialization
-				for (F &f:*vp) {
-					rpoco::visit(v,&f);
-				}
-				v.visit_end(array);
-			} else {
-				v.visit_end(array,[&v,vp](std::string& x) {
-					// deserialization
-					printf("GenAry:%s\n",x.c_str());
-					vp->emplace_back();
-					rpoco::visit(v,&(vp->back()));
-				});
-			}
-		}
-	};
+	*/
 
 	template<typename F>
 	class field<F*> : public fieldbase {
 	public:
 		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
 		virtual void visit(visitor &v,void *p) {
-			rpoco::visit(v,*(F**)( (uintptr_t)p+(ptrdiff_t)m_offset ));
+			F** fr=(F**)( (uintptr_t)p+(ptrdiff_t)m_offset );
+			if (v.has_data() && !*fr) {
+				*fr=new F();
+			}
+			rpoco::visit<F>(v,*fr);
 		}
 	};
 
