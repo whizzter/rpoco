@@ -6,6 +6,36 @@
 #include <rpoco/rpoco.hpp>
 
 namespace rpocojson {
+	template<typename X> bool parse(std::string str,X &x) {
+		struct json_parser : public rpoco::visitor {
+			bool ok=true;
+			virtual void visit(rpoco::visit_type vt) {
+				printf("VISITSOME:%d\n",vt);
+			}
+			virtual void visit(rpoco::field_provider *ti,void *p) {
+				visit(rpoco::object_start);
+				printf("VISITOBJ\n");
+				//printf("Has a %d\n",ti->has("a"));
+				//printf("Has x %d\n",ti->has("x"));
+				// REQ OBJSTART (visit objStart)
+				// EAT IDTOK (ID PART)
+				//  
+				// REQ OBJEND (visit objEnd)
+				visit(rpoco::object_end);
+			}
+			virtual void visit(int &iv) {
+				printf("VISITINT");
+			}
+			virtual void visit(std::string &str) {
+				printf("VISITSTR");
+			}
+		};
+		
+		json_parser parser;
+		rpoco::visit(parser,&x);
+		return parser.ok;
+	}
+
 	template<typename X> std::string to_json(X *x) {
 		struct json_writer : public rpoco::visitor {
 			enum wrstate {
@@ -96,7 +126,7 @@ namespace rpocojson {
 				out.append("\"");
 				post();
 			}
-			virtual void visit(rpoco::type_info *ti,void *p) {
+			virtual void visit(rpoco::field_provider *ti,void *p) {
 				if (!p) {
 					pre(false);
 					out.append("null");
@@ -106,14 +136,14 @@ namespace rpocojson {
 				visit(rpoco::object_start);
 				for (int i=0;i<ti->size();i++) {
 					visit((*ti)[i]->name());
-					(*ti)[i]->visit(this,p);
+					(*ti)[i]->visit(*this,p);
 				}
 				visit(rpoco::object_end);
 			}
 		};
 		json_writer writer;
 
-		rpoco::visit(&writer,x);
+		rpoco::visit(writer,x);
 		return writer.out;
 	}
 }

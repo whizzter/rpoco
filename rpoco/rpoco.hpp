@@ -56,7 +56,7 @@
 
 namespace rpoco {
 	class fieldbase;
-	class type_info;
+	class field_provider;
 
 	enum visit_type {
 		object_start,
@@ -69,7 +69,7 @@ namespace rpoco {
 		virtual void visit(visit_type vt)=0;
 		virtual void visit(int& x)=0;
 		virtual void visit(std::string &k)=0;
-		virtual void visit(type_info *ti,void *p)=0;
+		virtual void visit(field_provider *ti,void *p)=0;
 	};
 
 	class fieldbase {
@@ -88,29 +88,29 @@ namespace rpoco {
 		ptrdiff_t offset() {
 			return m_offset;
 		}
-		virtual void visit(visitor *v,void *p)=0;
+		virtual void visit(visitor &v,void *p)=0;
 	};
 
 	template<typename F>
-	void visit(visitor *v,F* f) {
-		v->visit(f?f->rpoco_type_info_get():0,f);
+	void visit(visitor &v,F* f) {
+		v.visit(f?f->rpoco_type_info_get():0,f);
 	}
 
 	template<>
-	void visit<int>(visitor *v,int* ip) {
-		if (ip) { v->visit(*ip); } else { v->visit(0,0); }
+	void visit<int>(visitor &v,int* ip) {
+		if (ip) { v.visit(*ip); } else { v.visit(0,0); }
 	}
 
 	template<>
-	void visit<std::string>(visitor *v,std::string* str) {
-		if (str) { v->visit(*str); } else { v->visit(0,0); }
+	void visit<std::string>(visitor &v,std::string* str) {
+		if (str) { v.visit(*str); } else { v.visit(0,0); }
 	}
 
 	template<typename F>
 	class field : public fieldbase {
 	public:
 		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
-		virtual void visit(visitor *v,void *p) {
+		virtual void visit(visitor &v,void *p) {
 			rpoco::visit(v,(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ));
 		}
 	};
@@ -119,14 +119,14 @@ namespace rpoco {
 	class field<std::map<std::string,F>> : public fieldbase {
 	public:
 		field(std::string name,ptrdiff_t off) : fieldbase(nameoff) {}
-		virtual void visit(visitor *v,void *p) {
+		virtual void visit(visitor &v,void *p) {
 			std::map<std::string,F> *mp=(std::map<std::string,F>*)( (uintptr_t)p+(ptrdiff_t)m_offset );
-			v->visit(object_start);
+			v.visit(object_start);
 			for (std::pair<std::string,F> &p:*mp) {
 				rpoco::visit(&p.first);
 				rpoco::visit(&p.second);
 			}
-			v->visit(object_end);
+			v.visit(object_end);
 		}
 	};
 
@@ -134,13 +134,13 @@ namespace rpoco {
 	class field<std::vector<F>> : public fieldbase {
 	public:
 		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
-		virtual void visit(visitor *v,void *p) {
+		virtual void visit(visitor &v,void *p) {
 			std::vector<F> *vp=(std::vector<F>*)( (uintptr_t)p+(ptrdiff_t)m_offset );
-			v->visit(array_start);
+			v.visit(array_start);
 			for (F &f:*vp) {
 				rpoco::visit(v,&f);
 			}
-			v->visit(array_end);
+			v.visit(array_end);
 		}
 	};
 
@@ -148,21 +148,36 @@ namespace rpoco {
 	class field<F*> : public fieldbase {
 	public:
 		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
-		virtual void visit(visitor *v,void *p) {
+		virtual void visit(visitor &v,void *p) {
 			rpoco::visit(v,*(F**)( (uintptr_t)p+(ptrdiff_t)m_offset ));
 		}
 	};
 
-	class type_info {
+	class field_provider {
+	public:
+		virtual int size()=0;
+		virtual bool has(std::string id)=0;
+		virtual fieldbase*& operator[](int idx)=0;
+		virtual fieldbase*& operator[](std::string id)=0;
+	};
+
+	class type_info : public field_provider {
 		std::vector<fieldbase*> fields;
+		std::unordered_map<std::string,fieldbase*> m_named_fields;
 		std::atomic<int> m_is_init;
 		std::mutex init_mutex;
 	public:
-		int size() {
+		virtual int size() {
 			return fields.size();
 		}
-		fieldbase*& operator[](int idx) {
+		virtual bool has(std::string id) {
+			return m_named_fields.end()!=m_named_fields.find(id);
+		}
+		virtual fieldbase*& operator[](int idx) {
 			return fields[idx];
+		}
+		virtual fieldbase*& operator[](std::string id) {
+			return m_named_fields[id];
 		}
 		int is_init() {
 			return m_is_init.load();
@@ -177,6 +192,7 @@ namespace rpoco {
 		void add(fieldbase *fb) {
 			//printf("Gotten field:%s at %p\n",fb->name().c_str(),fb->offset());
 			fields.push_back(fb);
+			m_named_fields[fb->name()]=fb;
 		}
 	};
 
