@@ -4,36 +4,109 @@
 #pragma once
 
 #include <rpoco/rpoco.hpp>
+#include <iostream>
+#include <sstream>
 
 namespace rpocojson {
-	template<typename X> bool parse(std::string str,X &x) {
+	template<typename X> bool parse(std::istream &in,X &x) {
 		struct json_parser : public rpoco::visitor {
+			std::istream *ins;
 			bool ok=true;
-			virtual void visit(rpoco::visit_type vt) {
-				printf("VISITSOME:%d\n",vt);
+			std::string tmp;
+
+			json_parser(std::istream &ins) {
+				this->ins=&ins;
 			}
-			virtual void visit(rpoco::field_provider *ti,void *p) {
-				visit(rpoco::object_start);
-				printf("VISITOBJ\n");
-				//printf("Has a %d\n",ti->has("a"));
-				//printf("Has x %d\n",ti->has("x"));
-				// REQ OBJSTART (visit objStart)
-				// EAT IDTOK (ID PART)
-				//  
-				// REQ OBJEND (visit objEnd)
-				visit(rpoco::object_end);
+			void skip() {
+				if (ok)
+					while(std::isspace(ins->peek())) ins->get();
+			}
+			
+			virtual bool visit_start(rpoco::visit_type vt) {
+				skip();
+				printf("VISITSOME start:%d\n",vt);
+				switch(vt) {
+				case rpoco::object:
+					ok&=ins->get()=='{';
+					break;
+				case rpoco::array :
+					ok&=ins->get()=='[';
+					break;
+				}
+				return false;
+			}
+			virtual void visit_end(rpoco::visit_type vt) {
+				abort(); // should not be called
+			}
+			virtual void visit_null() {
+				printf("visitnull\n");
+			}
+			virtual void visit_end(rpoco::visit_type vt,std::function<void (std::string&)> g) {
+				//printf("VISITSOME end:%d %c\n",vt,ins->peek());
+				skip();
+				if (vt==rpoco::object) {
+					if (ins->peek()!='}')
+						while(ok) {
+							ok&=ins->peek()=='"';
+							if (!ok) break;
+							tmp.clear();
+							visit(tmp);
+							skip();
+							ok&=ins->get()==':';
+							if (!ok) break;
+							skip();
+							g(tmp);
+							tmp.clear();
+							skip();
+							if (ins->peek()=='}')
+								break;
+							ok&=ins->get()==',';
+						}
+					ins->get();
+				} else if (vt==rpoco::array) {
+					abort();
+				} else abort();
 			}
 			virtual void visit(int &iv) {
-				printf("VISITINT");
+				skip();
+				int sign=1;
+				int acc=0;
+				if (ins->peek()=='+') {
+					ins->get();
+				} else if (ins->peek()=='-') {
+					ins->get();
+					sign=-1;
+				}
+				while(std::isdigit(ins->peek())) {
+					acc=acc*10 + ( ins->get()-'0' );
+				}
+				iv=sign*acc;
 			}
 			virtual void visit(std::string &str) {
-				printf("VISITSTR");
+				skip();
+				printf("VISITSTR %c\n",ins->peek());
+				ok&=ins->get()=='"';
+				if (!ok) return;
+				while(ok) {
+					int c=ins->get();
+					if (c==EOF) {
+						ok=false;
+						break;
+					}
+					if (c=='"')
+						break;
+					str.push_back((char)c);
+				}
+				printf("ComplStr:%s\n",str.c_str());
 			}
 		};
 		
-		json_parser parser;
+		json_parser parser(in);
 		rpoco::visit(parser,&x);
 		return parser.ok;
+	}
+	template<typename X> bool parse(std::string &str,X &x) {
+		return parse(std::istringstream(str),x);
 	}
 
 	template<typename X> std::string to_json(X *x) {
@@ -82,26 +155,35 @@ namespace rpocojson {
 					break;
 				}
 			}
-			virtual void visit(rpoco::visit_type vt) {
+			virtual bool visit_start(rpoco::visit_type vt) {
 				switch(vt) {
-				case rpoco::object_start :
+				case rpoco::object :
 					pre(false);
 					out.append("{");
 					state.push_back(objid);
 					break;
-				case rpoco::object_end :
+				case rpoco::array :
+					pre(false);
+					out.append("[");
+					state.push_back(ary);
+					break;
+				}
+				return true;
+			}
+			virtual void visit_end(rpoco::visit_type vt,std::function<void (std::string&)> g) {
+				// should not be called!
+				abort();
+			}
+			virtual void visit_end(rpoco::visit_type vt) {
+				switch(vt) {
+				case rpoco::object :
 					if (state.back()!=objid && state.back()!=objnxt)
 						abort();
 					state.pop_back();
 					out.append("}");
 					post();
 					break;
-				case rpoco::array_start :
-					pre(false);
-					out.append("[");
-					state.push_back(ary);
-					break;
-				case rpoco::array_end :
+				case rpoco::array :
 					if (state.back()!=ary && state.back()!=arynxt)
 						abort();
 					state.pop_back();
@@ -126,20 +208,26 @@ namespace rpocojson {
 				out.append("\"");
 				post();
 			}
-			virtual void visit(rpoco::field_provider *ti,void *p) {
-				if (!p) {
-					pre(false);
-					out.append("null");
-					post();
-					return;
-				}
-				visit(rpoco::object_start);
-				for (int i=0;i<ti->size();i++) {
-					visit((*ti)[i]->name());
-					(*ti)[i]->visit(*this,p);
-				}
-				visit(rpoco::object_end);
+			virtual void visit_null() {
+				pre(false);
+				out.append("null");
+				post();
 			}
+//			virtual void visit(rpoco::field_provider *ti,void *p) {
+//				if (!p) {
+//					pre(false);
+//					out.append("null");
+//					post();
+//					return;
+//				}
+//				if (visit_start(rpoco::object)) {
+//					for (int i=0;i<ti->size();i++) {
+//						visit((*ti)[i]->name());
+//						(*ti)[i]->visit(*this,p);
+//					}
+//				}
+//				visit_end(rpoco::object,[](std::string &x){});
+//			}
 		};
 		json_writer writer;
 

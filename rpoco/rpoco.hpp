@@ -14,6 +14,7 @@
 #include <cctype>
 #include <stdint.h>
 #include <type_traits>
+#include <functional>
 
 
 // Thread safe typeinfo init (double checked lock)
@@ -59,17 +60,18 @@ namespace rpoco {
 	class field_provider;
 
 	enum visit_type {
-		object_start,
-		object_end,
-		array_start,
-		array_end
+		object,
+		array
 	};
 
 	struct visitor {
-		virtual void visit(visit_type vt)=0;
+		virtual bool visit_start(visit_type vt)=0;
+		virtual void visit_end(visit_type vt)=0;
+		virtual void visit_end(visit_type vt,std::function<void(std::string&)> out)=0;
 		virtual void visit(int& x)=0;
 		virtual void visit(std::string &k)=0;
-		virtual void visit(field_provider *ti,void *p)=0;
+		virtual void visit_null()=0;
+		//virtual void visit(field_provider *ti,void *p)=0;
 	};
 
 	class fieldbase {
@@ -93,17 +95,36 @@ namespace rpoco {
 
 	template<typename F>
 	void visit(visitor &v,F* f) {
-		v.visit(f?f->rpoco_type_info_get():0,f);
+		if (f) {
+			field_provider *fp=f->rpoco_type_info_get();
+			if (v.visit_start(object)) {
+				for (int i=0;i<fp->size();i++) {
+					v.visit((*fp)[i]->name());
+					(*fp)[i]->visit(v,f);
+				}
+				v.visit_end(object);
+			} else {
+				v.visit_end(object,[&v,fp,f](std::string& n){
+					if (! fp->has(n))
+						return;
+					printf("HasProp:%s\n",n.c_str());
+					(*fp)[n]->visit(v,f);
+				});
+			}
+		} else {
+			v.visit_null();
+		}
+		//v.visit(f?f->rpoco_type_info_get():0,f);
 	}
 
 	template<>
 	void visit<int>(visitor &v,int* ip) {
-		if (ip) { v.visit(*ip); } else { v.visit(0,0); }
+		if (ip) { v.visit(*ip); } else { v.visit_null(); }
 	}
 
 	template<>
 	void visit<std::string>(visitor &v,std::string* str) {
-		if (str) { v.visit(*str); } else { v.visit(0,0); }
+		if (str) { v.visit(*str); } else { v.visit_null(); }
 	}
 
 	template<typename F>
@@ -121,12 +142,18 @@ namespace rpoco {
 		field(std::string name,ptrdiff_t off) : fieldbase(nameoff) {}
 		virtual void visit(visitor &v,void *p) {
 			std::map<std::string,F> *mp=(std::map<std::string,F>*)( (uintptr_t)p+(ptrdiff_t)m_offset );
-			v.visit(object_start);
-			for (std::pair<std::string,F> &p:*mp) {
-				rpoco::visit(&p.first);
-				rpoco::visit(&p.second);
+			if (v.visit_start(object_start)) {
+				// serialization
+				for (std::pair<std::string,F> &p:*mp) {
+					rpoco::visit(&p.first);
+					rpoco::visit(&p.second);
+				}
 			}
-			v.visit(object_end);
+			// deserialization
+			//for (std::string k:v) {
+			//	rpoco::visit( (*mp)[k] );
+			//}
+			v.visit_end(object_end,[](x){});
 		}
 	};
 
@@ -136,11 +163,20 @@ namespace rpoco {
 		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
 		virtual void visit(visitor &v,void *p) {
 			std::vector<F> *vp=(std::vector<F>*)( (uintptr_t)p+(ptrdiff_t)m_offset );
-			v.visit(array_start);
-			for (F &f:*vp) {
-				rpoco::visit(v,&f);
+			if (v.visit_start(array)) {
+				// serialization
+				for (F &f:*vp) {
+					rpoco::visit(v,&f);
+				}
+				v.visit_end(array);
+			} else {
+				v.visit_end(array,[&v,vp](std::string& x) {
+					// deserialization
+					printf("GenAry:%s\n",x.c_str());
+					vp->emplace_back();
+					rpoco::visit(v,&(vp->back()));
+				});
 			}
-			v.visit(array_end);
 		}
 	};
 
@@ -198,15 +234,15 @@ namespace rpoco {
 
 	std::vector<std::string> comma_split(const char *t) {
 		// skip spaces and commas
-		while(*t&&(isspace(*t)||*t==',')) { t++; }
+		while(*t&&(std::isspace(*t)||*t==',')) { t++; }
 		// token start pos
 		const char *s=t;
 		std::vector<std::string> out;
 		while(*t) {
-			if (*t==','||isspace(*t)) {
+			if (*t==','||std::isspace(*t)) {
 				out.push_back(std::string(s,t-s));
 				// skip spaces and commas
-				while(*t&&(isspace(*t)||*t==',')) { t++; }
+				while(*t&&(std::isspace(*t)||*t==',')) { t++; }
 				s=t;
 			} else {
 				t++;
