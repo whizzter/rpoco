@@ -28,8 +28,31 @@ struct SerVI {
 	RPOCO(ints);
 };
 
+template <typename T>
+struct roundtrip {
+	roundtrip(std::string in) {
+		T test;
+		if (!rpocojson::parse(in,test)) {
+			printf("Error parsing:%s\n",in.c_str());
+		}
+		std::string out=rpocojson::to_json(&test);
+		printf("In:<< %s >> Out:<< %s >>\n",in.c_str(),out.c_str());
+	}
+};
 
 int main(int argc,char **argv) {
+
+	roundtrip<Ser1>("{\"x\":30}");
+
+	roundtrip<Ser2>("{}");
+
+	roundtrip<Ser2>("{\"sub\":{\"x\":34},\"a\":12}");
+
+	roundtrip<Ser2P>("{}");
+	roundtrip<Ser2P>("{\"sub\":{\"x\":34},\"a\":12}");
+
+	roundtrip<SerVI>("{\"ints\":[1,23,456,78,9]}");
+
 	Ser1 s1;
 	s1.x=1;
 
@@ -65,7 +88,7 @@ int main(int argc,char **argv) {
 	rpocojson::parse(s1str,d1);
 	std::string d1str=rpocojson::to_json(&d1);
 	printf("%s\n",d1str.c_str());
-	//int x=s1str.begin();
+
 
 	return 0;
 }

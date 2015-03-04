@@ -61,10 +61,22 @@ namespace rpocojson {
 							if (ins->peek()=='}')
 								break;
 							ok&=ins->get()==',';
+							skip();
 						}
 					ins->get();
 				} else if (vt==rpoco::array) {
-					abort();
+					tmp.clear();
+					if (ins->peek()!=']')
+						while(ok) {
+							g(tmp);
+							skip();
+							if (ins->peek()==']')
+								break;
+							ok&=ins->get()==',';
+							skip();
+						}
+					ins->get();
+					//abort();
 				} else abort();
 			}
 			virtual void visit(int &iv) {
