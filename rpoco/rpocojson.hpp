@@ -113,7 +113,41 @@ namespace rpocojson {
 			}
 			virtual void visit(double &dv) {
 				skip();
-				abort(); // TODO: implement double parsing
+				tmp.clear();
+				// consume negative sign
+				if (ins->peek()=='-') {
+					tmp.push_back(ins->get());
+				}
+				// consume either a solitary 0 or a sequence of digits
+				if (ins->peek()=='0') {
+					tmp.push_back(ins->get());
+				} else if (std::isdigit(ins->peek())) {
+					while(std::isdigit(ins->peek()))
+						tmp.push_back(ins->get());
+				} else {
+					ok=false;
+					return;
+				}
+				// if we have a decimal point consume it.
+				if (ins->peek()=='.') {
+					tmp.push_back(ins->get());
+					while(std::isdigit(ins->peek()))
+						tmp.push_back(ins->get());
+				}
+				// do we have an exponent?
+				if (ins->peek()=='e' || ins->peek()=='E') {
+					tmp.push_back(ins->get());
+					if (ins->peek()=='+' || ins->peek()=='-') {
+						tmp.push_back(ins->get());
+					}
+					if(std::isdigit(ins->peek()))
+						ok=false;
+					while(std::isdigit(ins->peek()))
+						tmp.push_back(ins->get());
+				}
+				if (ok)
+					dv=std::stod(tmp);
+				tmp.clear();
 			}
 			virtual void visit(int &iv) {
 				skip();
