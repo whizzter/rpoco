@@ -17,7 +17,11 @@
 #include <functional>
 
 
-// Thread safe typeinfo init (double checked lock)
+// Use the RPOCO macro within a compound definition to create
+// automatic serialization information upon the specified members.
+// RPOCO has thread safe typeinfo init (double checked lock) so using
+// functions dependant of the functionality from multiple threads should
+// be safe.
 
 #define RPOCO(...) \
 	void rpoco_type_info_expand(rpoco::type_info *ti,std::vector<std::string>& names,int idx) {} \
@@ -38,26 +42,9 @@
 		return &ti; \
 	}
 
-
-// Write JSON:
-// beginObject
-// [] visitField
-// endObject
-
-// beginArray
-// visitField (no fieldbase?)
-// endArray
-
-// Read JSON
-// beginObject
-// []locatefield
-// endObject
-
-// beginArray
-
 namespace rpoco {
-	class fieldbase;
-	class field_provider;
+	class member;
+	class member_provider;
 
 	enum visit_type {
 		object,
@@ -72,12 +59,11 @@ namespace rpoco {
 		virtual void visit(std::string &k)=0;
 		virtual void visit_null()=0;
 		virtual bool has_data()=0;
-		//virtual void visit(field_provider *ti,void *p)=0;
 	};
 
 	template<typename F>
 	struct visit { visit(visitor &v,F &f) {
-		field_provider *fp=f.rpoco_type_info_get();
+		member_provider *fp=f.rpoco_type_info_get();
 		if (v.visit_start(object)) {
 			for (int i=0;i<fp->size();i++) {
 				v.visit((*fp)[i]->name());
@@ -143,56 +129,55 @@ namespace rpoco {
 			v.visit_null();
 	}};
 
-	template<>
-	struct visit<int> { visit (visitor &v,int &ip) {
+	template<> struct visit<int> { visit (visitor &v,int &ip) {
 		v.visit(ip);
 	}};
 
-	template<>
-	struct visit<std::string> { visit(visitor &v,std::string &str) {
+	template<> struct visit<std::string> { visit(visitor &v,std::string &str) {
 		v.visit(str);
 	}};
 
-	class fieldbase {
+	class member {
 	public:
 	protected:
 		std::string m_name;
-		ptrdiff_t m_offset;
 	public:
-		fieldbase(std::string name,ptrdiff_t offset) {
+		member(std::string name) {
 			this->m_name=name;
-			this->m_offset=offset;
 		}
 		std::string& name() {
 			return m_name;
-		}
-		ptrdiff_t offset() {
-			return m_offset;
 		}
 		virtual void visit(visitor &v,void *p)=0;
 	};
 
 
 	template<typename F>
-	class field : public fieldbase {
+	class field : public member {
+		ptrdiff_t m_offset;
 	public:
-		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
+		field(std::string name,ptrdiff_t off) : member(name) {
+			this->m_offset=off;
+		}
+		ptrdiff_t offset() {
+			return m_offset;
+		}
 		virtual void visit(visitor &v,void *p) {
 			rpoco::visit<F>(v,*(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ));
 		}
 	};
 
-	class field_provider {
+	class member_provider {
 	public:
 		virtual int size()=0;
 		virtual bool has(std::string id)=0;
-		virtual fieldbase*& operator[](int idx)=0;
-		virtual fieldbase*& operator[](std::string id)=0;
+		virtual member*& operator[](int idx)=0;
+		virtual member*& operator[](std::string id)=0;
 	};
 
-	class type_info : public field_provider {
-		std::vector<fieldbase*> fields;
-		std::unordered_map<std::string,fieldbase*> m_named_fields;
+	class type_info : public member_provider {
+		std::vector<member*> fields;
+		std::unordered_map<std::string,member*> m_named_fields;
 		std::atomic<int> m_is_init;
 		std::mutex init_mutex;
 	public:
@@ -202,10 +187,10 @@ namespace rpoco {
 		virtual bool has(std::string id) {
 			return m_named_fields.end()!=m_named_fields.find(id);
 		}
-		virtual fieldbase*& operator[](int idx) {
+		virtual member*& operator[](int idx) {
 			return fields[idx];
 		}
-		virtual fieldbase*& operator[](std::string id) {
+		virtual member*& operator[](std::string id) {
 			return m_named_fields[id];
 		}
 		int is_init() {
@@ -218,8 +203,7 @@ namespace rpoco {
 				m_is_init.store(1);
 			}
 		}
-		void add(fieldbase *fb) {
-			//printf("Gotten field:%s at %p\n",fb->name().c_str(),fb->offset());
+		void add(member *fb) {
 			fields.push_back(fb);
 			m_named_fields[fb->name()]=fb;
 		}
