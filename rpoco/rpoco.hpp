@@ -47,80 +47,89 @@ namespace rpoco {
 	class member_provider;
 
 	enum visit_type {
-		object,
-		array
+		vt_none,
+		vt_error,
+		vt_object,
+		vt_array,
+		vt_null,
+		vt_bool,
+		vt_number,
+		vt_string
 	};
 
 	struct visitor {
-		virtual bool visit_start(visit_type vt)=0;
-		virtual void visit_end(visit_type vt)=0;
-		virtual void visit_end(visit_type vt,std::function<void(std::string&)> out)=0;
-		virtual void visit(int& x)=0;
-		virtual void visit(std::string &k)=0;
+		virtual visit_type peek()=0;
+		virtual bool consume(visit_type vt,std::function<void(std::string&)> out)=0;
+		virtual void produce_start(visit_type vt)=0;
+		virtual void produce_end(visit_type vt)=0;
 		virtual void visit_null()=0;
-		virtual bool has_data()=0;
+		virtual void visit(bool& b)=0;
+		virtual void visit(int& x)=0;
+		virtual void visit(double& x)=0;
+		virtual void visit(std::string &k)=0;
 	};
 
 	template<typename F>
 	struct visit { visit(visitor &v,F &f) {
 		member_provider *fp=f.rpoco_type_info_get();
-		if (v.visit_start(object)) {
+		if (v.consume(vt_object,[&v,fp,&f](std::string& n){
+				if (! fp->has(n))
+					return;
+				(*fp)[n]->visit(v,(void*)&f);
+			}))
+		{
+			return;
+		} else {
+			v.produce_start(vt_object);
 			for (int i=0;i<fp->size();i++) {
 				v.visit((*fp)[i]->name());
 				(*fp)[i]->visit(v,(void*)&f);
 			}
-			v.visit_end(object);
-		} else {
-			v.visit_end(object,[&v,fp,f](std::string& n){
-				if (! fp->has(n))
-					return;
-				(*fp)[n]->visit(v,(void*)&f);
-			});
+			v.produce_end(vt_object);
 		}
-		//v.visit(f?f->rpoco_type_info_get():0,f);
 	}};
 
 	template<typename F>
-	struct visit<std::map<std::string,F>> { visit(visitor &v,std::map<std::string,F> *vp) {
-		if (*mp) {
-			v.visit_null();
+	struct visit<std::map<std::string,F>> { visit(visitor &v,std::map<std::string,F> &mp) {
+		if (v.consume(vt_object,[&v,&mp](std::string& x) {
+				// deserialization
+				rpoco::visit( (*mp)[x] );
+			}))
+		{
 			return;
-		}
-		if (v.visit_start(object)) {
+		} else {
+			v.produce_start(vt_object);
 			// serialization
 			for (std::pair<std::string,F> &p:*mp) {
 				rpoco::visit(&p.first);
 				rpoco::visit(&p.second);
 			}
-			v.visit_end(object);
-		} else {
-			v.visit_end(object,[&v,mp](std::string& x) {
-				 deserialization
-				rpoco::visit( (*mp)[x] );
-			});
+			v.produce_end(vt_object);
 		}
 	}};
 
 	template<typename F>
 	struct visit<std::vector<F>> { visit(visitor &v,std::vector<F> &vp) {
-		if (v.visit_start(array)) {
+		if (v.consume(vt_array,[&v,&vp](std::string& x) {
+				// deserialization
+				vp.emplace_back();
+				rpoco::visit<F>(v,vp.back());
+			}))
+		{
+			return ;
+		} else {
+			v.produce_start(vt_array);
 			// serialization
 			for (F &f:vp) {
 				rpoco::visit<F>(v,f);
 			}
-			v.visit_end(array);
-		} else {
-			v.visit_end(array,[&v,&vp](std::string& x) {
-				// deserialization
-				vp.emplace_back();
-				rpoco::visit<F>(v,vp.back());
-			});
+			v.produce_end(vt_array);
 		}
 	}};
 
 	template<typename F>
 	struct visit<F*> { visit(visitor &v,F *& fp) {
-		if (v.has_data() && !fp) {
+		if (v.peek()!=vt_null && v.peek()!=vt_none && !fp) {
 			fp=new F();
 		}
 		if (fp)

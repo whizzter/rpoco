@@ -14,8 +14,6 @@ namespace rpocojson {
 			bool ok=true;
 			std::string tmp;
 
-			bool pendingNull=false;
-
 			json_parser(std::istream &ins) {
 				this->ins=&ins;
 			}
@@ -24,50 +22,48 @@ namespace rpocojson {
 					while(std::isspace(ins->peek())) ins->get();
 			}
 			
-			virtual bool visit_start(rpoco::visit_type vt) {
-				skip();
-				switch(vt) {
-				case rpoco::object:
-					ok&=ins->get()=='{';
-					break;
-				case rpoco::array :
-					ok&=ins->get()=='[';
-					break;
-				}
-				return false;
-			}
-			virtual void visit_end(rpoco::visit_type vt) {
+			virtual void produce_start(rpoco::visit_type vt) {
 				abort(); // should not be called
 			}
-			virtual bool has_data() {
-				if (pendingNull)
-					return false;
-				if (!ok)
-					return false;
+			virtual void produce_end(rpoco::visit_type vt) {
+				abort(); // should not be called
+			}
+			virtual rpoco::visit_type peek() {
 				skip();
-				if (ins->peek()!='n') {
-					return ok;
+				if (std::isdigit(ins->peek()))
+					return rpoco::vt_number;
+				switch(ins->peek()) {
+				case '{' :
+					return rpoco::vt_object;
+				case '[' :
+					return rpoco::vt_array;
+				case '\"' :
+					return rpoco::vt_string;
+				case 't' :
+				case 'f' :
+					return rpoco::vt_bool;
+				case 'n' :
+					return rpoco::vt_null;
+				case '-' :
+					return rpoco::vt_number;
+				default:
+					ok=false;
+					return rpoco::vt_error;
 				}
-				ok&=ins->get()=='n';
-				ok&=ins->get()=='u';
-				ok&=ins->get()=='l';
-				pendingNull=(ok&(ins->peek()=='l'));
-				return ok && !pendingNull;
+			}
+			void match(const char *s) {
+				for (int i=0;s[i];i++)
+					ok&= (ins->get()==s[i]);
 			}
 			virtual void visit_null() {
-				if (!pendingNull) {
-					skip();
-					ok&=ins->get()=='n';
-					ok&=ins->get()=='u';
-					ok&=ins->get()=='l';
-				}
-				ok&=ins->get()=='l';
-				pendingNull=false;
-			}
-			virtual void visit_end(rpoco::visit_type vt,std::function<void (std::string&)> g) {
-				//printf("VISITSOME end:%d %c\n",vt,ins->peek());
 				skip();
-				if (vt==rpoco::object) {
+				match("null");
+			}
+			virtual bool consume(rpoco::visit_type vt,std::function<void (std::string&)> g) {
+				skip();
+				if (vt==rpoco::vt_object) {
+					ok&=ins->get()=='{';
+					if (!ok) return true;
 					if (ins->peek()!='}')
 						while(ok) {
 							ok&=ins->peek()=='"';
@@ -87,7 +83,9 @@ namespace rpocojson {
 							skip();
 						}
 					ins->get();
-				} else if (vt==rpoco::array) {
+				} else if (vt==rpoco::vt_array) {
+					ok&=ins->get()=='[';
+					if (!ok) return true;
 					tmp.clear();
 					if (ins->peek()!=']')
 						while(ok) {
@@ -101,14 +99,27 @@ namespace rpocojson {
 					ins->get();
 					//abort();
 				} else abort();
+				return true;
+			}
+			virtual void visit(bool &bv) {
+				skip();
+				if (ins->peek()=='t') {
+					bv=true;
+					match("true");
+				} else {
+					bv=false;
+					match("false");
+				}
+			}
+			virtual void visit(double &dv) {
+				skip();
+				abort(); // TODO: implement double parsing
 			}
 			virtual void visit(int &iv) {
 				skip();
 				int sign=1;
 				int acc=0;
-				if (ins->peek()=='+') {
-					ins->get();
-				} else if (ins->peek()=='-') {
+				if (ins->peek()=='-') {
 					ins->get();
 					sign=-1;
 				}
@@ -188,44 +199,61 @@ namespace rpocojson {
 					break;
 				}
 			}
-			virtual bool visit_start(rpoco::visit_type vt) {
+			virtual void produce_start(rpoco::visit_type vt) {
 				switch(vt) {
-				case rpoco::object :
+				case rpoco::vt_object :
 					pre(false);
 					out.append("{");
 					state.push_back(objid);
 					break;
-				case rpoco::array :
+				case rpoco::vt_array :
 					pre(false);
 					out.append("[");
 					state.push_back(ary);
 					break;
+				default:
+					abort();
 				}
-				return true;
 			}
-			virtual void visit_end(rpoco::visit_type vt,std::function<void (std::string&)> g) {
-				// should not be called!
-				abort();
+			virtual bool consume(rpoco::visit_type vt,std::function<void (std::string&)> g) {
+				// does not consume
+				return false;
 			}
-			virtual void visit_end(rpoco::visit_type vt) {
+			virtual void produce_end(rpoco::visit_type vt) {
 				switch(vt) {
-				case rpoco::object :
+				case rpoco::vt_object :
 					if (state.back()!=objid && state.back()!=objnxt)
 						abort();
 					state.pop_back();
 					out.append("}");
 					post();
 					break;
-				case rpoco::array :
+				case rpoco::vt_array :
 					if (state.back()!=ary && state.back()!=arynxt)
 						abort();
 					state.pop_back();
 					out.append("]");
 					post();
 					break;
+				default:
+					abort();
 				}
 			}
 			
+			virtual void visit(bool& bv) {
+				if (state.back()==objid)
+					abort();
+				pre(false);
+				out.append(bv?"true":"false");
+				post();
+			}
+			virtual void visit(double& dv) {
+				if (state.back()==objid)
+					abort();
+				pre(false);
+				out.append(std::to_string(dv));
+				post();
+			}
 			virtual void visit(int& iv) {
 				if (state.back()==objid)
 					abort();
@@ -241,8 +269,8 @@ namespace rpocojson {
 				out.append("\"");
 				post();
 			}
-			virtual bool has_data() {
-				return false;
+			virtual rpoco::visit_type peek() {
+				return rpoco::vt_none;
 			}
 			virtual void visit_null() {
 				pre(false);
