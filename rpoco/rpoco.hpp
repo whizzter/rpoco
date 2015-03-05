@@ -140,6 +140,14 @@ namespace rpoco {
 		}
 	}};
 
+	template<typename F>
+	struct visit<F*> { visit(visitor &v,F** fpp) {
+		if (v.has_data() && !*fpp) {
+			*fpp=new F();
+		}
+		visit<F>(v,*fpp);
+	}};
+
 	template<>
 	struct visit<int> { visit (visitor &v,int* ip) {
 		if (ip) { v.visit(*ip); } else { v.visit_null(); }
@@ -182,19 +190,6 @@ namespace rpoco {
 		}
 	};
 	*/
-
-	template<typename F>
-	class field<F*> : public fieldbase {
-	public:
-		field(std::string name,ptrdiff_t off) : fieldbase(name,off) {}
-		virtual void visit(visitor &v,void *p) {
-			F** fr=(F**)( (uintptr_t)p+(ptrdiff_t)m_offset );
-			if (v.has_data() && !*fr) {
-				*fr=new F();
-			}
-			rpoco::visit<F>(v,*fr);
-		}
-	};
 
 	class field_provider {
 	public:
