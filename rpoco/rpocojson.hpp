@@ -135,14 +135,14 @@ namespace rpocojson {
 		};
 		
 		json_parser parser(in);
-		rpoco::visit<X>(parser,&x);
+		rpoco::visit<X>(parser,x);
 		return parser.ok;
 	}
 	template<typename X> bool parse(std::string &str,X &x) {
 		return parse(std::istringstream(str),x);
 	}
 
-	template<typename X> std::string to_json(X *x) {
+	template<typename X> std::string to_json(X &x) {
 		struct json_writer : public rpoco::visitor {
 			enum wrstate {
 				def   =0x1,
