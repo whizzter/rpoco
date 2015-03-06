@@ -66,6 +66,7 @@ namespace rpocojson {
 					if (!ok) return true;
 					if (ins->peek()!='}')
 						while(ok) {
+							skip();
 							ok&=ins->peek()=='"';
 							if (!ok) break;
 							tmp.clear();
@@ -89,6 +90,7 @@ namespace rpocojson {
 					tmp.clear();
 					if (ins->peek()!=']')
 						while(ok) {
+							skip();
 							g(tmp);
 							skip();
 							if (ins->peek()==']')
@@ -130,7 +132,8 @@ namespace rpocojson {
 				}
 				// if we have a decimal point consume it.
 				if (ins->peek()=='.') {
-					tmp.push_back(ins->get());
+					//tmp.push_back(ins->get());
+					tmp.append( localeconv()->decimal_point );
 					while(std::isdigit(ins->peek()))
 						tmp.push_back(ins->get());
 				}
@@ -140,7 +143,7 @@ namespace rpocojson {
 					if (ins->peek()=='+' || ins->peek()=='-') {
 						tmp.push_back(ins->get());
 					}
-					if(std::isdigit(ins->peek()))
+					if(!std::isdigit(ins->peek()))
 						ok=false;
 					while(std::isdigit(ins->peek()))
 						tmp.push_back(ins->get());
@@ -168,12 +171,15 @@ namespace rpocojson {
 				if (!ok) return;
 				while(ok) {
 					int c=ins->get();
+					// TODO: checking of invalid character codes.
 					if (c==EOF) {
 						ok=false;
 						break;
 					}
 					if (c=='"')
 						break;
+					// TODO: support for parsing escape codes
+					// TODO: support for handling incomming unicode characters.
 					str.push_back((char)c);
 				}
 			}
@@ -317,6 +323,218 @@ namespace rpocojson {
 		rpoco::visit<X>(writer,x);
 		return writer.out;
 	}
+
+	class json_value {
+		rpoco::visit_type m_type;
+		union {
+			bool b;
+			double n;
+			std::string *s;
+			std::vector<json_value> *a;
+			std::map<std::string,json_value> *o;
+		}data;
+		void copy_from(const json_value &other) {
+			set_type(other.m_type);
+			switch(other.m_type) {
+			case rpoco::vt_array :
+				*data.a=*other.data.a;
+				break;
+			case rpoco::vt_object :
+				*data.o=*other.data.o;
+				break;
+			case rpoco::vt_string :
+				*data.s=*other.data.s;
+				break;
+			case rpoco::vt_bool :
+				data.b=other.data.b;
+				break;
+			case rpoco::vt_number :
+				data.n=other.data.n;
+				break;
+			}
+		}
+	public:
+		json_value() {
+			m_type=rpoco::vt_null;
+		}
+		json_value(double v) {
+			m_type=rpoco::vt_number;
+			data.n=v;
+		}
+		json_value(const json_value &other) {
+			m_type=rpoco::vt_null;
+			copy_from(other);
+		}
+		json_value& operator=(const json_value &other) {
+			copy_from(other);
+			return *this;
+		}
+		void set_null() {
+			set_type(rpoco::vt_null);
+		}
+		json_value& operator=(double d) {
+			set_type(rpoco::vt_number);
+			data.n=d;
+			return *this;
+		}
+		json_value& operator=(bool b) {
+			set_type(rpoco::vt_bool);
+			data.b=b;
+			return *this;
+		}
+		json_value& operator=(std::string s) {
+			set_type(rpoco::vt_string);
+			*data.s=s;
+			return *this;
+		}
+		rpoco::visit_type type() {
+			return m_type;
+		}
+		bool to_bool() {
+			if (m_type==rpoco::vt_bool) {
+				return data.b;
+			} else {
+				return false;
+			}
+		}
+		double to_number() {
+			if (m_type==rpoco::vt_number) {
+				return data.n;
+			} else {
+				return 0;
+			}
+		}
+		std::string to_string() {
+			if (m_type==rpoco::vt_string) {
+				return *data.s;
+			} else {
+				return std::string("");
+			}
+		}
+		std::map<std::string,json_value>* map() {
+			if (m_type!=rpoco::vt_object)
+				return 0;
+			return data.o;
+		}
+		std::vector<json_value>* array() {
+			if (m_type!=rpoco::vt_array)
+				return 0;
+			return data.a;
+		}
+		void set_type(rpoco::visit_type toType) {
+			if (m_type!=toType) {
+				switch(m_type) {
+				case rpoco::vt_string :
+					delete data.s;
+					break;
+				case rpoco::vt_array :
+					delete data.a;
+					break;
+				case rpoco::vt_object :
+					delete data.o;
+					break;
+				}
+				switch(toType) {
+				case rpoco::vt_array :
+					data.a=new std::vector<json_value>();
+					break;
+				case rpoco::vt_object :
+					data.o=new std::map<std::string,json_value>();
+					break;
+				case rpoco::vt_string :
+					data.s=new std::string();
+					break;
+				case rpoco::vt_number :
+					data.n=0;
+					break;
+				case rpoco::vt_bool :
+					data.b=false;
+					break;
+				}
+			}
+			m_type=toType;
+		}
+		~json_value() {
+			set_type(rpoco::vt_null);
+		}
+	};
+}
+
+namespace rpoco {
+	template<> struct visit<rpocojson::json_value> { visit (visitor &v,rpocojson::json_value &jv) {
+		if (v.peek()==vt_none) {
+			switch(jv.type()) {
+			case vt_null : {
+					v.visit_null();
+				} break;
+			case vt_number : {
+					double d=jv.to_number();
+					v.visit(d);
+				} break;
+			case vt_bool : {
+					bool b=jv.to_bool();
+					v.visit(b);
+				} break;
+			case vt_string : {
+					std::string str=jv.to_string();
+					v.visit(str);
+				} break;
+			case vt_object :
+				rpoco::visit<std::map<std::string,rpocojson::json_value>>(v,*jv.map());
+				//v.produce_start(rpoco::vt_object);
+				//jv.object_items([&v](std::string &n,rpocojson::json_value &sv){
+				//	v.visit(n);
+				//	visit(v,sv);
+				//});
+				//v.produce_end(rpoco::vt_array);
+				break;
+			case vt_array : {
+					rpoco::visit<std::vector<rpocojson::json_value>>(v,*jv.array());
+					//std::string tmp("");
+					//v.produce_start(rpoco::vt_object);
+					//jv.array_items([&v,&tmp](int idx,rpocojson::json_value &sv){
+					//	v.visit(tmp);
+					//	visit(v,sv);
+					//});
+					//v.produce_end(rpoco::vt_array);
+				} break;
+			default:
+				abort();
+			}
+			return;
+		} else {
+			switch(v.peek()) {
+			case vt_null : {
+					v.visit_null();
+					jv.set_null();
+				} break;
+			case vt_number : {
+					double d;
+					v.visit(d);
+					jv=d;
+				} break;
+			case vt_bool : {
+					bool b;
+					v.visit(b);
+					jv=b;
+				} break;
+			case vt_string : {
+					std::string s;
+					v.visit(s);
+					jv=s;
+				} break;
+			case vt_object : {
+					jv.set_type(rpoco::vt_object);
+					rpoco::visit<std::map<std::string,rpocojson::json_value>>(v,*jv.map());
+				} break;
+			case vt_array : {
+					jv.set_type(rpoco::vt_array);
+					rpoco::visit<std::vector<rpocojson::json_value>>(v,*jv.array());
+				} break;
+			}
+		}
+	}};
+
 }
 
 #endif // __INCLUDED_RPOCOJSON_HPP__

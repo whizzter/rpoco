@@ -45,6 +45,19 @@ struct roundtrip {
 		printf("In:<< %s >> Out:<< %s >>\n",in.c_str(),out.c_str());
 	}
 };
+template <typename T>
+struct roundtrip<T*> {
+	roundtrip(std::string in) {
+		T* test=0;
+		if (!rpocojson::parse(in,test)) {
+			printf("Error parsing:%s\n",in.c_str());
+		}
+		std::string out=rpocojson::to_json(test);
+		printf("In:<< %s >> Out:<< %s >>\n",in.c_str(),out.c_str());
+	}
+};
+
+using rpocojson::json_value;
 
 int main(int argc,char **argv) {
 
@@ -60,6 +73,14 @@ int main(int argc,char **argv) {
 	roundtrip<SerVI>("{\"ints\":[1,23,456,78,9]}");
 	roundtrip<SerPVI>("{\"ints\":null}");
 	roundtrip<SerPVI>("{\"ints\":[1,23,456,78,9]}");
+
+	roundtrip<json_value*>("null");
+	roundtrip<json_value*>("123");
+	roundtrip<json_value*>("567.13");
+	roundtrip<json_value*>("true");
+	roundtrip<json_value*>("false");
+	roundtrip<json_value*>("\"Hello world\"");
+	roundtrip<json_value*>("  {\"hello\":[1,2,\"world\",true,false,{  \"x\":3,\"y\":4},null,1e20]}  ");
 
 	Ser1 s1;
 	s1.x=1;

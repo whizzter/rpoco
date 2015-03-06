@@ -93,16 +93,16 @@ namespace rpoco {
 	struct visit<std::map<std::string,F>> { visit(visitor &v,std::map<std::string,F> &mp) {
 		if (v.consume(vt_object,[&v,&mp](std::string& x) {
 				// deserialization
-				rpoco::visit( (*mp)[x] );
+				rpoco::visit<F>(v, mp[x] );
 			}))
 		{
 			return;
 		} else {
 			v.produce_start(vt_object);
 			// serialization
-			for (std::pair<std::string,F> &p:*mp) {
-				rpoco::visit(&p.first);
-				rpoco::visit(&p.second);
+			for (std::pair<std::string,F> p:mp) {
+				rpoco::visit<std::string>(v,p.first);
+				rpoco::visit<F>(v,p.second);
 			}
 			v.produce_end(vt_object);
 		}
