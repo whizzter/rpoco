@@ -408,11 +408,84 @@ namespace rpocojson {
 				out.append(std::to_string(iv));
 				post();
 			}
+			char toHex(int c) {
+				c&=0xf;
+				if (c<10)
+					return c+'0';
+				else
+					return c-10+'A';
+			}
+			void dumpUniEscape( int c) {
+				out.append("\\u");
+				out.push_back( toHex(c>>12) );
+				out.push_back( toHex(c>>8) );
+				out.push_back( toHex(c>>4) );
+				out.push_back( toHex(c) );
+			}
 			virtual void visit(std::string &str) {
+				struct strsrc {
+					std::string *p;
+					int idx;
+					strsrc(std::string *s) {
+						idx=0;
+						p=s;
+					}
+					int peek() {
+						if (idx==p->size())
+							return EOF;
+						return ((*p)[idx])&0xff;
+					}
+					int get() {
+						int c=peek();
+						if (c!=EOF) idx++;
+						return c;
+					}
+				}src(&str);
 				pre(true);
 				out.append("\"");
 				// TODO: proper string encoding
-				out.append(str);
+				//out.append(str);
+				while(src.peek()!=EOF) {
+					int c=readUTF8(src);
+					//printf("Encoding:%d (%c)\n",c,c);
+					switch(c) {
+					case '\"' :
+						out.append("\\\"");
+						continue;
+					case '\\' :
+						out.append("\\\\");
+						continue;
+					case '/' :
+						out.append("\\/");
+						continue;
+					case '\b' :
+						out.append("\\b");
+						continue;
+					case '\f' :
+						out.append("\\f");
+						continue;
+					case '\n' :
+						out.append("\\n");
+						continue;
+					case '\r' :
+						out.append("\\r");
+						continue;
+					case '\t' :
+						out.append("\\t");
+						continue;
+					}
+					if (c>=32 && c<127) {
+						out.push_back((char)c);
+					} else if (c>0x10ffff) {
+						abort(); // out of range character
+					} else if (c>0xffff) {
+						c-=0x10000;
+						dumpUniEscape( 0xd800 | ((c>>10)&0x3ff) );
+						dumpUniEscape( 0xdc00 | (c&0x3ff) );
+					} else {
+						dumpUniEscape( c );
+					}
+				}
 				out.append("\"");
 				post();
 			}
