@@ -6,8 +6,56 @@
 #include <rpoco/rpoco.hpp>
 #include <iostream>
 #include <sstream>
+#include <stdint.h>
 
 namespace rpocojson {
+	template<typename X> void dumpUTF8(X &x,uint32_t c) {
+		if (c<0x80) {
+			x.push_back((char)c);
+		} else {
+			struct dump {
+				void dmp(X &x,int used,unsigned int rest) {
+					if ( rest&(used|~0xff) ) {
+						// need more bits, try again with the 6 bottom bits chopped of and a new mask.
+						dmp(x,used|(used>>1),rest>>6);
+						// dump out our continuation
+						x.push_back((char)(0x80|(rest&0x3f)));
+					} else {
+						// dump out the signature bits.
+						x.push_back((char)(((used<<1)|rest )&0xff));
+					}
+				}
+			} d;
+			d.dmp(x,0xc0,c);
+		}
+	}
+	template<typename X> int readUTF8(X &x) {
+		int out=x.get();
+		if (out==EOF)
+			return EOF;
+		if (!(out&0x80)) {
+			return out;
+		}
+		int mask=0xc0; // start with continuation mask
+		while(mask!=0xff) {
+			if ( (mask<<1)&0xff == (out&mask) )
+				break; // is all bits but the lowest of the mask set?
+			mask|=mask>>1; // no match, widen the mask.
+		}
+		if (mask==0xff || mask==0xc0)
+			return EOF; // got a continuation byte or an filled mask, return error as EOF
+		out&=~mask;
+		while(mask&0x40) {
+			int next=x.get();
+			if (next==EOF)
+				return EOF; // mid-character EOF, return EOF
+			if (0x80!=(next&0xc0))
+				return EOF; // EOF is extra char data isn't continuation.
+			out=(out<<6)|(next&0x3f);
+			mask<<=1;
+		}
+		return out;
+	}
 	template<typename X> bool parse(std::istream &in,X &x) {
 		struct json_parser : public rpoco::visitor {
 			std::istream *ins;
@@ -165,23 +213,82 @@ namespace rpocojson {
 				}
 				iv=sign*acc;
 			}
+			int readSimpleCharacter() {
+				int c=readUTF8(*ins);
+				if (c=='\\') {
+					switch(c=ins->get()) {
+					case '\"' : case '\\' : case '/' :
+						break; // use the character found directly.
+					case 'b' :
+						c='\b';
+						break;
+					case 'f' :
+						c='\f';
+						break;
+					case 'n' :
+						c='\n';
+						break;
+					case 'r' :
+						c='\r';
+						break;
+					case 't' :
+						c='\t';
+						break;
+					case 'u' : {
+							c=0;
+							for (int i=0;i<4;i--) {
+								int tmp=ins->get();
+								c=c<<4;
+								if ( '0'<=tmp && tmp<='9')
+									c|=tmp-'0';
+								if ( 'A'<=tmp && tmp<='F')
+									c|=tmp-'A';
+								else if ( 'a'<=tmp && tmp<='f')
+									c|=tmp-'a';
+								else {
+									ok=false;
+									return EOF;
+								}
+							}
+						} break;
+					default:
+						ok=false;
+						return EOF;
+					}
+				}
+				return c;
+			}
 			virtual void visit(std::string &str) {
 				skip();
 				ok&=ins->get()=='"';
 				if (!ok) return;
 				while(ok) {
-					int c=ins->get();
-					// TODO: checking of invalid character codes.
+					int c=ins->peek();
+					if (c==EOF || c<32) {
+						// EOF or control code encountered
+						ok=false;
+						return;
+					}
+					if (c=='"')
+						break;
+					c=readSimpleCharacter();
 					if (c==EOF) {
 						ok=false;
 						break;
 					}
-					if (c=='"')
-						break;
-					// TODO: support for parsing escape codes
-					// TODO: support for handling incomming unicode characters.
-					str.push_back((char)c);
+					if(c>=0xd800 && c<0xdc00) {
+						// surrogate pair encountered
+						int c2=readSimpleCharacter();
+						if (!(c2>=0xdc00 && c2<0xe000)) {
+							ok=false;
+							return;
+						}
+						c=( ((c&0x3ff)<<10)|(c2&0x3ff) )+0x10000;
+					}
+					dumpUTF8(str,c);
 				}
+				// eat "
+				ins->get();
 			}
 		};
 		
