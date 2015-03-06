@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <type_traits>
 #include <functional>
+#include <memory>
 
 
 // Use the RPOCO macro within a compound definition to create
@@ -131,6 +132,28 @@ namespace rpoco {
 	struct visit<F*> { visit(visitor &v,F *& fp) {
 		if (v.peek()!=vt_null && v.peek()!=vt_none && !fp) {
 			fp=new F();
+		}
+		if (fp)
+			visit<F>(v,*fp);
+		else
+			v.visit_null();
+	}};
+
+	template<typename F>
+	struct visit<std::shared_ptr<F>> { visit(visitor &v,std::shared_ptr<F> & fp) {
+		if (v.peek()!=vt_null && v.peek()!=vt_none && !fp) {
+			fp.reset(new F());
+		}
+		if (fp)
+			visit<F>(v,*fp);
+		else
+			v.visit_null();
+	}};
+
+	template<typename F>
+	struct visit<std::unique_ptr<F>> { visit(visitor &v,std::unique_ptr<F> & fp) {
+		if (v.peek()!=vt_null && v.peek()!=vt_none && !fp) {
+			fp.reset(new F());
 		}
 		if (fp)
 			visit<F>(v,*fp);
