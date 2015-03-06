@@ -18,8 +18,7 @@ using namespace std::tr2::sys;
 using namespace rpocojson;
 
 int main(int argc,char **argv) {
-	path p="tests";
-	p/="json";
+	path p="json";
 	p/="json_parser";
 	printf("%s\n",p.string().c_str());
 	for (directory_iterator it=directory_iterator(p);it!=directory_iterator();++it) {
