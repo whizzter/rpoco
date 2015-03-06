@@ -13,10 +13,8 @@ reading and writing and from that a set of macros and templates expands
 a type info structures that the JSON parser/writer and other tools
 can hook into to automate serialization work.
 
-## license
-Copyright 2015, Jonas Lund
+## License
 
-json_parser test files are seprately copyrighted and licensed.
+This library is copyrighted under a simple BSD license, see the LICENSE file
 
-Copyright (C) 2012, 2013 James McLaughlin et al.  All rights reserved. 
-
+The json_parser test files are seprately copyrighted and licensed under a similar license, see the tests/json/json_parser/LICENSE file
