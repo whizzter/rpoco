@@ -38,7 +38,7 @@ namespace rpocojson {
 		}
 		int mask=0xc0; // start with continuation mask
 		while(mask!=0xff) {
-			if ( (mask<<1)&0xff == (out&mask) )
+			if ( ((mask<<1)&0xff) == (out&mask) )
 				break; // is all bits but the lowest of the mask set?
 			mask|=mask>>1; // no match, widen the mask.
 		}
@@ -181,6 +181,9 @@ namespace rpocojson {
 				// if we have a decimal point consume it.
 				if (ins->peek()=='.') {
 					//tmp.push_back(ins->get());
+					// eat the dot
+					ins->get();
+					// but append the locale decimal point
 					tmp.append( localeconv()->decimal_point );
 					while(std::isdigit(ins->peek()))
 						tmp.push_back(ins->get());
@@ -236,12 +239,12 @@ namespace rpocojson {
 						break;
 					case 'u' : {
 							c=0;
-							for (int i=0;i<4;i--) {
+							for (int i=0;i<4;i++) {
 								int tmp=ins->get();
 								c=c<<4;
 								if ( '0'<=tmp && tmp<='9')
 									c|=tmp-'0';
-								if ( 'A'<=tmp && tmp<='F')
+								else if ( 'A'<=tmp && tmp<='F')
 									c|=tmp-'A';
 								else if ( 'a'<=tmp && tmp<='f')
 									c|=tmp-'a';
@@ -294,7 +297,8 @@ namespace rpocojson {
 		
 		json_parser parser(in);
 		rpoco::visit<X>(parser,x);
-		return parser.ok;
+		parser.skip();
+		return parser.ok && EOF==in.peek();
 	}
 	template<typename X> bool parse(std::string &str,X &x) {
 		return parse(std::istringstream(str),x);
