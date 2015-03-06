@@ -2,7 +2,8 @@
 
 #include <rpoco/rpocojson.hpp>
 
-struct Ser1 {
+
+struct Simple {
 	std::string hello;
 	int x=0;
 
@@ -12,19 +13,19 @@ struct Ser1 {
 int main(int argc,char **argv) {
 
 	// declare structure
-	Ser1 d1;
+	Simple data;
 
 	// sample data
-	std::string sampleData="{ \"hello\":\"world\"  ,  \"x\":123  }";
+	std::string sampleText="{ \"hello\":\"world\"  ,  \"x\":123  }";
 
 	// parse in data
-	rpocojson::parse(sampleData,d1);
+	rpocojson::parse(sampleText,data);
 	
 	// now write the data from the object back to a new json string
-	std::string d1str=rpocojson::to_json(d1);
+	std::string outputText=rpocojson::to_json(data);
 
 	// and print it
-	printf("%s\n",d1str.c_str());
+	printf("%s\n",outputText.c_str());
 
 	return 0;
 }
