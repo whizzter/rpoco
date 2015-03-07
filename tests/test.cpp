@@ -18,12 +18,12 @@ using namespace std::tr2::sys;
 
 using namespace rpocojson;
 
-bool node_verify=false;
+bool node_diff=false;
 
 int main(int argc,char **argv) {
 	for (int i=1;i<argc;i++) {
-		if (std::string("-node")==argv[i]) {
-			node_verify=true;
+		if (std::string("-node-diff")==argv[i]) {
+			node_diff=true;
 		}
 	}
 
@@ -42,13 +42,13 @@ int main(int argc,char **argv) {
 		bool pr=parse(is,jv);
 		if (wanted==pr) {
 			printf("%s was %s as expected\n",it->path().string().c_str(),pr?"parsed":"not parsed");
-			if (pr && node_verify) {
+			if (pr && node_diff) {
 				std::string outname=it->path().string()+".out";
 				{
 					std::ofstream os(outname);
 					os << to_json(jv);
 				}
-				std::string cmd="node verify.js "+it->path().string()+" "+outname;
+				std::string cmd="node json_diff.js "+it->path().string()+" "+outname;
 				std::system(cmd.c_str());
 			}
 		} else {

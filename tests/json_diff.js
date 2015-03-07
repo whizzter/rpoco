@@ -1,12 +1,22 @@
+#!/usr/bin/env node
+
 var fs=require("fs");
 
+var argIdx=0;
+if (process.argv[0]=="node") {
+	argIdx++;
+}
+
+if (process.argv.length-argIdx<3) {
+	console.log("no files to diff, please supply the name of 2 json files");
+	process.exit(-1);
+}
 
 console.log("----------------------");
-console.log(process.argv[2]);
-console.log(process.argv[3]);
+console.log(process.argv[argIdx+1]+" compared to "+process.argv[argIdx+2]);
 
-var a=JSON.parse(fs.readFileSync(process.argv[2]));
-var b=JSON.parse(fs.readFileSync(process.argv[3]));
+var a=JSON.parse(fs.readFileSync(process.argv[argIdx+1]));
+var b=JSON.parse(fs.readFileSync(process.argv[argIdx+2]));
 
 function diff(a,b) {
 	if (typeof a != typeof b) {
@@ -47,7 +57,7 @@ function diff(a,b) {
 
 var df=diff(a,b)
 
-console.log("diffs?:"+df);
+console.log("files differ?:"+df);
 if (df) {
 	console.log("----------------------");
 	console.log(a);
