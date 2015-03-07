@@ -402,7 +402,12 @@ namespace rpocojson {
 				if (state.back()==objid)
 					abort();
 				pre(false);
-				out.append(std::to_string(dv));
+				char buf[500];
+				sprintf(buf,"%.17g",dv);
+				for (int i=0;buf[i];i++)
+					if (buf[i]==',')
+						buf[i]='.';
+				out.append(buf);
 				post();
 			}
 			virtual void visit(int& iv) {
