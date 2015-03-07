@@ -45,14 +45,14 @@ namespace rpocojson {
 		if (mask==0xff || mask==0xc0)
 			return EOF; // got a continuation byte or an filled mask, return error as EOF
 		out&=~mask;
-		while(mask&0x40) {
+		while(mask&0x20) {
 			int next=x.get();
 			if (next==EOF)
 				return EOF; // mid-character EOF, return EOF
 			if (0x80!=(next&0xc0))
 				return EOF; // EOF is extra char data isn't continuation.
 			out=(out<<6)|(next&0x3f);
-			mask<<=1;
+			mask = (mask<<1)&0xff;
 		}
 		return out;
 	}
@@ -245,9 +245,9 @@ namespace rpocojson {
 								if ( '0'<=tmp && tmp<='9')
 									c|=tmp-'0';
 								else if ( 'A'<=tmp && tmp<='F')
-									c|=tmp-'A';
+									c|=tmp-'A'+10;
 								else if ( 'a'<=tmp && tmp<='f')
-									c|=tmp-'a';
+									c|=tmp-'a'+10;
 								else {
 									ok=false;
 									return EOF;
@@ -459,9 +459,9 @@ namespace rpocojson {
 					case '\\' :
 						out.append("\\\\");
 						continue;
-					case '/' :
-						out.append("\\/");
-						continue;
+					//case '/' :
+					//	out.append("\\/");
+					//	continue;
 					case '\b' :
 						out.append("\\b");
 						continue;
