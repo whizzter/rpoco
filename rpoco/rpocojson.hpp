@@ -161,26 +161,9 @@ namespace rpocojson {
 					match("false");
 				}
 			}
-			virtual void visit(double &dv) {
-				skip();
-				tmp.clear();
-				// consume negative sign
-				if (ins->peek()=='-') {
-					tmp.push_back(ins->get());
-				}
-				// consume either a solitary 0 or a sequence of digits
-				if (ins->peek()=='0') {
-					tmp.push_back(ins->get());
-				} else if (std::isdigit(ins->peek())) {
-					while(std::isdigit(ins->peek()))
-						tmp.push_back(ins->get());
-				} else {
-					ok=false;
-					return;
-				}
+			void consume_frac_and_exp() {
 				// if we have a decimal point consume it.
 				if (ins->peek()=='.') {
-					//tmp.push_back(ins->get());
 					// eat the dot
 					ins->get();
 					// but append the locale decimal point
@@ -199,6 +182,25 @@ namespace rpocojson {
 					while(std::isdigit(ins->peek()))
 						tmp.push_back(ins->get());
 				}
+			}
+			virtual void visit(double &dv) {
+				skip();
+				tmp.clear();
+				// consume negative sign
+				if (ins->peek()=='-') {
+					tmp.push_back(ins->get());
+				}
+				// consume either a solitary 0 or a sequence of digits
+				if (ins->peek()=='0') {
+					tmp.push_back(ins->get());
+				} else if (std::isdigit(ins->peek())) {
+					while(std::isdigit(ins->peek()))
+						tmp.push_back(ins->get());
+				} else {
+					ok=false;
+					return;
+				}
+				consume_frac_and_exp();
 				if (ok)
 					dv=std::stod(tmp);
 				tmp.clear();
@@ -215,6 +217,22 @@ namespace rpocojson {
 					acc=acc*10 + ( ins->get()-'0' );
 				}
 				iv=sign*acc;
+				// now a fallback in case we got something more complex than a simple integer.
+				int c=ins->peek();
+				if (c=='.' || c=='e' || c=='E') {
+					// not encoded as a just a simple integer, do a complex fallback path.
+					// first dump the integer prefix
+					tmp=std::to_string(acc);
+					// then consume the rest of the number info
+					consume_frac_and_exp();
+					if (ok) {
+						double dv=std::stod(tmp);
+						iv=dv;
+						// verify that the number was a valid integer.
+						ok=(iv==dv);
+					}
+					tmp.clear();
+				}
 			}
 			int readSimpleCharacter() {
 				int c=readUTF8(*ins);
