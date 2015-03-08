@@ -69,7 +69,6 @@ namespace rpocojson {
 				if (ok)
 					while(std::isspace(ins->peek())) ins->get();
 			}
-			
 			virtual void produce_start(rpoco::visit_type vt) {
 				abort(); // should not be called
 			}
@@ -311,6 +310,13 @@ namespace rpocojson {
 				// eat "
 				ins->get();
 			}
+			virtual void visit(char *str,int c) {
+				std::string tmp;
+				visit(tmp);
+				if (tmp.size()>=c) {
+					ok=false;
+				}
+			}
 		};
 		
 		json_parser parser(in);
@@ -448,6 +454,13 @@ namespace rpocojson {
 				out.push_back( toHex(c>>8) );
 				out.push_back( toHex(c>>4) );
 				out.push_back( toHex(c) );
+			}
+			virtual void visit(char *str,int sz) {
+				for (int i=0;i<sz;i++)
+					if (!str[i])
+						sz=i;
+				std::string tmp(str,sz);
+				visit(tmp);
 			}
 			virtual void visit(std::string &str) {
 				struct strsrc {

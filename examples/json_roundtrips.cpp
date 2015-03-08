@@ -38,6 +38,17 @@ struct SerPVI {
 	RPOCO(ints);
 };
 
+struct SerStrs {
+	std::string a;
+	char b[6];
+
+	SerStrs() {
+		b[0]=0;
+	}
+
+	RPOCO(a,b);
+};
+
 template <typename T>
 struct roundtrip {
 	roundtrip(std::string in) {
@@ -97,6 +108,10 @@ int main(int argc,char **argv) {
 	roundtrip<std::shared_ptr<Ser1>>("null");
 	roundtrip<std::shared_ptr<Ser1>>("{}");
 	roundtrip<std::shared_ptr<Ser1>>("{\"x\":30}");
+
+	roundtrip<SerStrs>("{}");
+	roundtrip<SerStrs>("{\"a\":\"hello\", \"b\":\"world\"}");
+	roundtrip<SerStrs>("{\"a\":\"hello\", \"b\":\"toobig\"}");
 
 	return 0;
 }

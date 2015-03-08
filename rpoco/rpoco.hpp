@@ -68,6 +68,7 @@ namespace rpoco {
 		virtual void visit(int& x)=0;
 		virtual void visit(double& x)=0;
 		virtual void visit(std::string &k)=0;
+		virtual void visit(char *,int sz)=0;
 	};
 
 	template<typename F>
@@ -167,6 +168,10 @@ namespace rpoco {
 
 	template<> struct visit<std::string> { visit(visitor &v,std::string &str) {
 		v.visit(str);
+	}};
+
+	template<int SZ> struct visit<char[SZ]> { visit(visitor &v,char (&str)[SZ]) {
+		v.visit(str,SZ);
 	}};
 
 	class member {
