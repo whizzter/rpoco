@@ -111,7 +111,8 @@ namespace rpocojson {
 				if (vt==rpoco::vt_object) {
 					ok&=ins->get()=='{';
 					if (!ok) return true;
-					if (ins->peek()!='}')
+					skip();
+					if (ins->peek() != '}')
 						while(ok) {
 							skip();
 							ok&=ins->peek()=='"';

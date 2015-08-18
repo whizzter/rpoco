@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 
+#include <iostream>
 
 // Use the RPOCO macro within a compound definition to create
 // automatic serialization information upon the specified members.
@@ -47,6 +48,8 @@ namespace rpoco {
 	class member;
 	class member_provider;
 
+	struct niltarget {};
+
 	enum visit_type {
 		vt_none,
 		vt_error,
@@ -75,9 +78,12 @@ namespace rpoco {
 	struct visit { visit(visitor &v,F &f) {
 		member_provider *fp=f.rpoco_type_info_get();
 		if (v.consume(vt_object,[&v,fp,&f](std::string& n){
-				if (! fp->has(n))
-					return;
-				(*fp)[n]->visit(v,(void*)&f);
+				if (! fp->has(n)) {
+					niltarget nt;
+					rpoco::visit<niltarget>(v,nt);
+				} else {
+					(*fp)[n]->visit(v,(void*)&f);
+				}
 			}))
 		{
 			return;
@@ -107,6 +113,36 @@ namespace rpoco {
 				rpoco::visit<F>(v,p.second);
 			}
 			v.produce_end(vt_object);
+		}
+	}};
+
+	template<>
+	struct visit<niltarget> { visit(visitor &v,niltarget &nt) {
+		visit_type vtn;
+		switch(vtn=v.peek()) {
+		case vt_null :
+			v.visit_null();
+			break;
+		case vt_number : {
+				double d;
+				v.visit(d);
+			} break;
+		case vt_bool : {
+				bool b;
+				v.visit(b);
+			} break;
+		case vt_string : {
+				std::string str;
+				v.visit(str);
+			} break;
+		case vt_array :
+		case vt_object : {
+				v.consume(vtn,[&v,&nt](std::string& propname) {
+					niltarget ntn;
+					std::cout<<"Ignoring prop:"<<propname<<"\n";
+					rpoco::visit<niltarget>(v,ntn);
+				});
+			} break;
 		}
 	}};
 
