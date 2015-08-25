@@ -7,6 +7,8 @@
 #include <iostream>
 #include <sstream>
 #include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 namespace rpocojson {
 	template<typename X> void dumpUTF8(X &x,uint32_t c) {
@@ -227,9 +229,9 @@ namespace rpocojson {
 					consume_frac_and_exp();
 					if (ok) {
 						double dv=std::stod(tmp);
-						iv=dv;
+						iv=(int)dv;
 						// verify that the number was a valid integer.
-						ok=(iv==dv);
+						ok=((double)iv==dv);
 					}
 					tmp.clear();
 				}
@@ -311,11 +313,15 @@ namespace rpocojson {
 				// eat "
 				ins->get();
 			}
-			virtual void visit(char *str,int c) {
+			virtual void visit(char *str,size_t sz) {
 				std::string tmp;
 				visit(tmp);
-				if (tmp.size()>=c) {
+				if (tmp.size()>=sz) {
 					ok=false;
+					str[0] = 0;
+				} else {
+					memcpy(str,tmp.data(),sz);
+					str[sz] = 0;
 				}
 			}
 		};
@@ -428,7 +434,11 @@ namespace rpocojson {
 					abort();
 				pre(false);
 				char buf[500];
-				sprintf(buf,"%.17g",dv);
+#ifdef _MSC_VER
+				sprintf_s(buf,sizeof(buf),"%.17g",dv);
+#else
+				snprintf(buf,sizeof(buf),"%.17g",dv);
+#endif
 				for (int i=0;buf[i];i++)
 					if (buf[i]==',')
 						buf[i]='.';
@@ -456,8 +466,8 @@ namespace rpocojson {
 				out.push_back( toHex(c>>4) );
 				out.push_back( toHex(c) );
 			}
-			virtual void visit(char *str,int sz) {
-				for (int i=0;i<sz;i++)
+			virtual void visit(char *str,size_t sz) {
+				for (size_t i=0;i<sz;i++)
 					if (!str[i])
 						sz=i;
 				std::string tmp(str,sz);

@@ -71,7 +71,7 @@ namespace rpoco {
 		virtual void visit(int& x)=0;
 		virtual void visit(double& x)=0;
 		virtual void visit(std::string &k)=0;
-		virtual void visit(char *,int sz)=0;
+		virtual void visit(char *,size_t sz)=0;
 	};
 
 	template<typename F>
