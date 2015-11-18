@@ -1,3 +1,6 @@
+// This header provides dynamic and templatized JSON serialization on
+// top of the RPOCO type information.16_
+
 #ifndef __INCLUDED_RPOCOJSON_HPP__
 #define __INCLUDED_RPOCOJSON_HPP__
 
@@ -11,19 +14,36 @@
 #include <stdio.h>
 
 namespace rpocojson {
-	template<typename X> void dumpUTF8(X &x,uint32_t c) {
+	// Functions to parse the istream or string into the templatized target
+	// these functions will return true if the parsing was successful.
+	// Optional support exists for the parser to skip over C/C++ style comments.
+	// By default UTF16 surrogate decoding is done so that the UTF8 strings
+	// has full codepoints instead of surrogate pairs.
+	template<typename X> bool parse(std::istream &in,X &x,bool allow_c_comments,bool utf16_to_utf8);
+	template<typename X> bool parse(std::string &str,X &x,bool allow_c_comments,bool utf16_to_utf8);
+	// A function to convert an RPOCO compatible structure to a JSON string.
+	template<typename X> std::string to_json(X &x);
+	// a catch-all class to read in arbitrary data from JSON fields.
+	class json_value;
+
+	// create a UTF8 sequence from a unicode codepoint
+	// X is the type of our output
+	template<typename X> void dump_utf8(X &x,uint32_t c) {
 		if (c<0x80) {
+			// plain ascii are below 128
 			x.push_back((char)c);
 		} else {
+			// recursive call to count and produce a heading byte indicating the needed number of bytes
 			struct dump {
 				void dmp(X &x,int used,unsigned int rest) {
+					// test if the rest of the bits fits inside the UTF8 count mask
 					if ( rest&(used|~0xff) ) {
-						// need more bits, try again with the 6 bottom bits chopped of and a new mask.
+						// if not, we need more bits, try again with the 6 bottom bits chopped of and a new mask.
 						dmp(x,used|(used>>1),rest>>6);
-						// dump out our continuation
+						// dump out our bits afterwardss
 						x.push_back((char)(0x80|(rest&0x3f)));
 					} else {
-						// dump out the signature bits.
+						// dump out the count mask and initial bits
 						x.push_back((char)(((used<<1)|rest )&0xff));
 					}
 				}
@@ -31,22 +51,29 @@ namespace rpocojson {
 			d.dmp(x,0xc0,c);
 		}
 	}
-	template<typename X> int readUTF8(X &x) {
+	// decode a UTF8 sequence into a codepoint
+	// X is our input stream type
+	template<typename X> int read_utf8(X &x) {
 		int out=x.get();
 		if (out==EOF)
 			return EOF;
+		// simple ascii code
 		if (!(out&0x80)) {
 			return out;
 		}
-		int mask=0xc0; // start with continuation mask
+		// start with continuation mask
+		int mask=0xc0;
+		// size the bitmask
 		while(mask!=0xff) {
 			if ( ((mask<<1)&0xff) == (out&mask) )
 				break; // is all bits but the lowest of the mask set?
 			mask|=mask>>1; // no match, widen the mask.
 		}
+		// invalid masks to read, too long or continuation mask
 		if (mask==0xff || mask==0xc0)
 			return EOF; // got a continuation byte or an filled mask, return error as EOF
 		out&=~mask;
+		// dump the UTF8 bytes
 		while(mask&0x20) {
 			int next=x.get();
 			if (next==EOF)
@@ -58,101 +85,185 @@ namespace rpocojson {
 		}
 		return out;
 	}
-	template<typename X> bool parse(std::istream &in,X &x) {
-		struct json_parser : public rpoco::visitor {
-			std::istream *ins;
-			bool ok=true;
-			std::string tmp;
 
-			json_parser(std::istream &ins) {
+	// the public JSON parsing function
+	// X is the type of the RPOCO conforming target data type that will receive the root JSON data object.
+	// utf16 to utf8 translates utf16 surrogate pairs to utf8 codepoints
+	template<typename X> bool parse(std::istream &in,X &x,bool allow_c_comments = false,bool utf16_to_utf8 = true) {
+		// an internal class with the actual logic acting as a rpoco visitor
+		struct json_parser : public rpoco::visitor {
+			// validity indicator, used for early exiting after errors
+			bool ok = true;
+			// the input
+			std::istream *ins;
+			// temporary string object used during various phases of the parsing
+			std::string tmp;
+			// allow C/C++ style comments within JSON literals
+			bool allow_c_comments;
+			// decode utf16 surrogates
+			bool utf16_to_utf8;
+
+			// constructor to take the options and input for the parser.
+			json_parser(std::istream &ins,bool allow_c_comments = false,bool utf16_to_utf8 = true) {
 				this->ins=&ins;
+				this->allow_c_comments = allow_c_comments;
+				this->utf16_to_utf8 = utf16_to_utf8;
 			}
+			// skip non-spaces (and comments if that is enabled)
 			void skip() {
-				if (ok)
-					while(std::isspace(ins->peek())) ins->get();
+				while (ok) {
+					if (std::isspace(ins->peek())) {
+						ins->get();
+						continue;
+					}
+					if (allow_c_comments && ins->peek() == '/') {
+						ins->get(); // eat '/'
+						switch (ins->peek()) { // what kind of comment do we have
+						case '/' :
+							// single line comment, eat until carriage return,linefeed or form feed
+							while (true) {
+								int c = ins->peek();
+								if (c == 13 || c == 10 || c == 12 || c==EOF) {
+									break;
+								} else {
+									ins->get();
+									continue;
+								}
+							}
+							continue;
+						case '*' :
+							// multiline comment
+							{
+								ins->get(); // eat '*'
+								int last = 0;
+								while (ok) {
+									int c = ins->get();
+									if (c == EOF) {
+										// EOF inside comment leads to a syntax error.
+										ok = false;
+										break;
+									} else if (last == '*'&&c == '/') {
+										// end of multiline comment found.
+										break;
+									} else {
+										last = c;
+									}
+								}
+								if (ok)
+									continue;
+								break;
+							}
+						default:
+							// syntax error in JSON
+							ok = false;
+							break;
+						}
+					}
+					// not a comment
+					break;
+				}
 			}
+			// production functions are invalid to be called by the visitor during parsing.
 			virtual void produce_start(rpoco::visit_type vt) {
 				abort(); // should not be called
 			}
+			// production functions are invalid to be called by the visitor during parsing.
 			virtual void produce_end(rpoco::visit_type vt) {
 				abort(); // should not be called
 			}
+			// the peek function hints at what kind of objects can be consumed.
 			virtual rpoco::visit_type peek() {
-				skip();
+				skip(); // skip any spaces and comments so we can identify the token based on the first character
+				// first check digits
 				if (std::isdigit(ins->peek()))
 					return rpoco::vt_number;
 				switch(ins->peek()) {
-				case '{' :
+				case '{' : // object start
 					return rpoco::vt_object;
-				case '[' :
+				case '[' : // array start
 					return rpoco::vt_array;
-				case '\"' :
+				case '\"' : // string start
 					return rpoco::vt_string;
-				case 't' :
-				case 'f' :
+				case 't' : // true start
+				case 'f' : // false start
 					return rpoco::vt_bool;
-				case 'n' :
+				case 'n' : // null start
 					return rpoco::vt_null;
-				case '-' :
+				case '-' : // negative number start
 					return rpoco::vt_number;
-				default:
+				default: // invalid object start, stop parsing.
 					ok=false;
 					return rpoco::vt_error;
 				}
 			}
+			// a match function used to skip the remainder of known constants (null/true/false)
 			void match(const char *s) {
 				for (int i=0;s[i];i++)
 					ok&= (ins->get()==s[i]);
 			}
+			// null parsing
 			virtual void visit_null() {
 				skip();
 				match("null");
 			}
+			// object and array parsing function ("consumption")
+			// the visit type is checked and then the 
 			virtual bool consume(rpoco::visit_type vt,std::function<void (std::string&)> g) {
 				skip();
 				if (vt==rpoco::vt_object) {
+					// JSON object
 					ok&=ins->get()=='{';
 					if (!ok) return true;
 					skip();
 					if (ins->peek() != '}')
 						while(ok) {
+							// first validate and get the property name string
 							skip();
 							ok&=ins->peek()=='"';
-							if (!ok) break;
+							if (!ok) break; // stop if not a string property
+							// now reset the tmp string
 							tmp.clear();
+							// read in the property name
 							visit(tmp);
+							// ensure that we have a correct separator :
 							skip();
 							ok&=ins->get()==':';
-							if (!ok) break;
+							if (!ok) break; // stop if syntax error
 							skip();
+							// invoke the consumer function with the key to parse the rest
 							g(tmp);
 							tmp.clear();
 							skip();
 							if (ins->peek()=='}')
-								break;
+								break; // end of object
 							ok&=ins->get()==',';
 							skip();
 						}
-					ins->get();
+					if (ok)
+						ins->get(); // read '}'
 				} else if (vt==rpoco::vt_array) {
+					// JSON array
 					ok&=ins->get()=='[';
 					if (!ok) return true;
 					tmp.clear();
 					if (ins->peek()!=']')
 						while(ok) {
 							skip();
+							// just let the consumer read in the members
 							g(tmp);
 							skip();
+							// and detect the trailing ']' or check the separator comma
 							if (ins->peek()==']')
 								break;
 							ok&=ins->get()==',';
 							skip();
 						}
-					ins->get();
-					//abort();
-				} else abort();
+					if (ok)
+						ins->get(); // get end ']'
+				} else abort(); // consume can only be called for objects and arrays
 				return true;
 			}
+			// boolean parsing
 			virtual void visit(bool &bv) {
 				skip();
 				if (ins->peek()=='t') {
@@ -163,6 +274,9 @@ namespace rpocojson {
 					match("false");
 				}
 			}
+			// a dual purpose function to parse JSON numbers
+			// and convert them to a double of the current locale since the
+			// standard built in double parsing functions are locale dependant
 			void consume_frac_and_exp() {
 				// if we have a decimal point consume it.
 				if (ins->peek()=='.') {
@@ -185,6 +299,7 @@ namespace rpocojson {
 						tmp.push_back(ins->get());
 				}
 			}
+			// double number visitor
 			virtual void visit(double &dv) {
 				skip();
 				tmp.clear();
@@ -207,6 +322,9 @@ namespace rpocojson {
 					dv=std::stod(tmp);
 				tmp.clear();
 			}
+			// integer visitor, has a fast path for obvious integers and also
+			// a checking path that parses the number as a double and then
+			// checks that the result is still an integer (or fails the parsing)
 			virtual void visit(int &iv) {
 				skip();
 				int sign=1;
@@ -236,8 +354,11 @@ namespace rpocojson {
 					tmp.clear();
 				}
 			}
+			// reads a single UTF16 character inside a string, used by
+			// the string parsing to convert the result to a
+			// UTF8 representation without codepoints.
 			int readSimpleCharacter() {
-				int c=readUTF8(*ins);
+				int c=read_utf8(*ins);
 				if (c=='\\') {
 					switch(c=ins->get()) {
 					case '\"' : case '\\' : case '/' :
@@ -281,6 +402,8 @@ namespace rpocojson {
 				}
 				return c;
 			}
+			// Parse strings to UTF8, converts UTF16 surrogate pairs
+			// to full codepoints if the option is enabled.
 			virtual void visit(std::string &str) {
 				skip();
 				ok&=ins->get()=='"';
@@ -299,20 +422,22 @@ namespace rpocojson {
 						ok=false;
 						break;
 					}
-					if(c>=0xd800 && c<0xdc00) {
-						// surrogate pair encountered
+					if(utf16_to_utf8 && c>=0xd800 && c<0xdc00) {
+						// surrogate pair encountered and conversion enabled.
 						int c2=readSimpleCharacter();
 						if (!(c2>=0xdc00 && c2<0xe000)) {
+							// invalid secondary surrogate pair character
 							ok=false;
 							return;
 						}
 						c=( ((c&0x3ff)<<10)|(c2&0x3ff) )+0x10000;
 					}
-					dumpUTF8(str,c);
+					dump_utf8(str,c);
 				}
 				// eat "
 				ins->get();
 			}
+			// fixed size string
 			virtual void visit(char *str,size_t sz) {
 				std::string tmp;
 				visit(tmp);
@@ -325,45 +450,62 @@ namespace rpocojson {
 				}
 			}
 		};
-		
-		json_parser parser(in);
+		// init parser object and then use it to visit the target
+		json_parser parser(in,allow_c_comments,utf16_to_utf8);
 		rpoco::visit<X>(parser,x);
 		parser.skip();
 		return parser.ok && EOF==in.peek();
 	}
-	template<typename X> bool parse(std::string &str,X &x) {
-		return parse(std::istringstream(str),x);
+	// small utility to wrap strings into streams if needed for parsing.
+	template<typename X> bool parse(std::string &str,X &x,bool allow_c_comments = false,bool utf16_to_utf8 = true) {
+		return parse(std::istringstream(str),x,allow_c_comments,utf16_to_utf8);
 	}
 
+	// function to dump an arbitrary RPOCO oobject as a string containing a JSON object
 	template<typename X> std::string to_json(X &x) {
+		// the json_writer extends the rpoco::visitor struct to receive
+		// data as the generic visitation code visits the structure.
 		struct json_writer : public rpoco::visitor {
-			enum wrstate {
-				def   =0x1,
-				objid =0x2,
-				objval=0x3,
-				objnxt=0x4,
-				ary   =0x5,
-				arynxt=0x6,
-				end   =0x1000
-			};
+			// the output string
 			std::string out;
+			// state stack to keep track of terminators at each level.
+			enum wrstate {
+				def   =0x1, // default
+				objid =0x2, // inside object expecting a propname
+				objval=0x3, // inside object expecting a value
+				objnxt=0x4, // inside object either expecting term or a new propname
+				ary   =0x5, // inside array
+				arynxt=0x6, // inside array either expecting term or a new value
+				end   =0x1000 // termination
+			};
 			std::vector<wrstate> state;
+			// initialize state with a dummy constructor
 			json_writer() {
 				state={def};
 			}
+			// pre-value function call to dump the appropriate separator
+			// characters when the value is a member of a object literal or array
 			void pre(bool str) {
-				if (state.back()==end)
+				if (state.back() == end) {
+					// cannot write objects if we're at an end-state
 					abort();
+				}
 				if (state.back()==objnxt) {
+					// with another property being added to an object,
+					// add a ',' and advance state
 					out.append(",");
 					state.back()=objid;
 				}
 				if (state.back()==objid && !str) {
+					// object property names must be strings
 					abort();
 				} else if (state.back()==arynxt) {
+					// append commas when expecting another value in
+					// an array
 					out.append(",");
 				}
 			}
+			// post-value, update state
 			void post() {
 				switch(state.back()) {
 				case ary :
@@ -381,15 +523,21 @@ namespace rpocojson {
 					break;
 				}
 			}
+			// called when entering a object or array
+			// responsible for updating the state stack
 			virtual void produce_start(rpoco::visit_type vt) {
 				switch(vt) {
 				case rpoco::vt_object :
+					// update the previous level
 					pre(false);
+					// print and setup the object
 					out.append("{");
 					state.push_back(objid);
 					break;
 				case rpoco::vt_array :
+					// update the previous level
 					pre(false);
+					// print and setup the array
 					out.append("[");
 					state.push_back(ary);
 					break;
@@ -397,61 +545,86 @@ namespace rpocojson {
 					abort();
 				}
 			}
+			// visitor interface to query production or consumption mode
 			virtual bool consume(rpoco::visit_type vt,std::function<void (std::string&)> g) {
-				// does not consume
+				// the generator does not consume anything, return false
 				return false;
 			}
+			// called to produce the object end
 			virtual void produce_end(rpoco::visit_type vt) {
 				switch(vt) {
 				case rpoco::vt_object :
+					// sanity check
 					if (state.back()!=objid && state.back()!=objnxt)
 						abort();
+					// exit object
 					state.pop_back();
 					out.append("}");
+					// call parent state to indicate end-of-value
 					post();
 					break;
 				case rpoco::vt_array :
+					// sanity check
 					if (state.back()!=ary && state.back()!=arynxt)
 						abort();
+					// exit array
 					state.pop_back();
 					out.append("]");
+					// call parent state to indicate end-of-value
 					post();
 					break;
 				default:
 					abort();
 				}
 			}
-			
+			// boolean visitor
 			virtual void visit(bool& bv) {
+				// sanity check
 				if (state.back()==objid)
 					abort();
+				// inform parent of value start
 				pre(false);
+				// dump value
 				out.append(bv?"true":"false");
+				// inform parent of value end
 				post();
 			}
+			// double visitor
 			virtual void visit(double& dv) {
+				// sanity check
 				if (state.back()==objid)
 					abort();
+				// inform parent of value start
 				pre(false);
+				// dump double string
 				char buf[500];
 #ifdef _MSC_VER
 				sprintf_s(buf,sizeof(buf),"%.17g",dv);
 #else
 				snprintf(buf,sizeof(buf),"%.17g",dv);
 #endif
+				// replace commas in locales where
+				// they appear.
 				for (int i=0;buf[i];i++)
 					if (buf[i]==',')
 						buf[i]='.';
 				out.append(buf);
+				// inform parent of value end
 				post();
 			}
+			// integer visitor
 			virtual void visit(int& iv) {
+				// sanity check
 				if (state.back()==objid)
 					abort();
+				// inform parent of value start
 				pre(false);
+				// dump integer string
 				out.append(std::to_string(iv));
+				// inform parent of value end
 				post();
 			}
+			// get 1 hex character
 			char toHex(int c) {
 				c&=0xf;
 				if (c<10)
@@ -459,6 +632,7 @@ namespace rpocojson {
 				else
 					return c-10+'A';
 			}
+			// dump JSON UTF16 codepoint
 			void dumpUniEscape( int c) {
 				out.append("\\u");
 				out.push_back( toHex(c>>12) );
@@ -466,7 +640,9 @@ namespace rpocojson {
 				out.push_back( toHex(c>>4) );
 				out.push_back( toHex(c) );
 			}
+			// visit null terminated string
 			virtual void visit(char *str,size_t sz) {
+				// TODO: encapsulate to avoid copy and construction
 				for (size_t i=0;i<sz;i++)
 					if (!str[i])
 						sz=i;
@@ -497,7 +673,7 @@ namespace rpocojson {
 				// TODO: proper string encoding
 				//out.append(str);
 				while(src.peek()!=EOF) {
-					int c=readUTF8(src);
+					int c=read_utf8(src);
 					//printf("Encoding:%d (%c)\n",c,c);
 					switch(c) {
 					case '\"' :
@@ -555,6 +731,7 @@ namespace rpocojson {
 		return writer.out;
 	}
 
+	// a generic catch-all class that can have any kind of JSON data.
 	class json_value {
 		rpoco::visit_type m_type;
 		union {
@@ -692,6 +869,8 @@ namespace rpocojson {
 }
 
 namespace rpoco {
+	// create a specialization visitor for rpocojson::json_value to enable
+	// it to work coherently with the rest of the rpoco types.
 	template<> struct visit<rpocojson::json_value> { visit (visitor &v,rpocojson::json_value &jv) {
 		if (v.peek()==vt_none) {
 			switch(jv.type()) {
