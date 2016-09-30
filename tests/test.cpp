@@ -14,7 +14,26 @@
 
 // Note: we probably need some #ifdefs to work with other compilers than MSVC2013
 //       since <filesystem> has been standardized since the release of this compiler.
-using namespace std::tr2::sys;
+
+#ifdef _MSC_VER
+ #if _MSC_VER <= 1800
+  #define STD_FS_TR2
+ #else
+  #if _MSC_VER <= 1900
+   #define STD_FS_EXP
+  #endif
+ #endif
+#endif
+
+#ifdef STD_FS_TR2
+ using namespace std::tr2::sys;
+#else
+ #ifdef STD_FS_EXP
+  using namespace std::experimental::filesystem;
+ #else
+  using namespace std::filesystem;
+ #endif
+#endif
 
 using namespace rpocojson;
 
@@ -34,9 +53,9 @@ int main(int argc,char **argv) {
 		if (it->path().extension()!=".json")
 			continue;
 
-		bool wanted=0==it->path().filename().find("valid-");
-		bool extWanted = 0 == it->path().filename().find("ext-valid-");
-		bool doExt = extWanted || (0==it->path().filename().find("ext-invalid-"));
+		bool wanted=0==it->path().filename().string().find("valid-");
+		bool extWanted = 0 == it->path().filename().string().find("ext-valid-");
+		bool doExt = extWanted || (0==it->path().filename().string().find("ext-invalid-"));
 
 		for (int i = 0; i< (doExt ? 2 : 1); i++) {
 			json_value *jv = 0;
