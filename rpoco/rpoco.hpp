@@ -85,6 +85,242 @@ namespace rpoco {
 		virtual void visit(std::string &k)=0; // 
 		virtual void visit(char *,size_t sz)=0;
 	};
+	
+	struct query {
+		virtual visit_type kind()=0;
+
+		bool find(const char* name,std::function<void(query&)> qt){
+			std::string nm(name);
+			return find(nm,qt);
+		}
+
+
+		virtual void all(std::function<void(std::string&,query&)>)=0;
+		virtual bool find(std::string & name,std::function<void(query&)>)=0;
+		virtual void add(std::string & name,std::function<void(query&)>)=0;
+
+		virtual void all(std::function<void(int,query&)>)=0;
+		virtual bool at(std::string & name,std::function<void(query&)>)=0;
+		virtual void add(std::function<void(query&)>)=0;
+
+		virtual operator bool*() = 0 ;
+		virtual operator int*() = 0 ;
+		virtual operator double*() = 0 ;
+		virtual void set(const char *) = 0; // set a string value (or null!)
+		virtual void set(std::string &k)=0; // set a string value
+		virtual std::string get()=0;
+	};
+
+	struct emptyquery : query {
+		virtual void all(std::function<void(std::string&,query&)>) {}
+		virtual bool find(std::string & name,std::function<void(query&)>) {
+			return false;
+		}
+		virtual void add(std::string & name,std::function<void(query&)> q) {
+			q(*this);
+		}
+
+		virtual void all(std::function<void(int,query&)>) {}
+		virtual bool at(std::string & name,std::function<void(query&)>) {
+			return false;
+		}
+		virtual void add(std::function<void(query&)> q) {
+			q(*this);
+		}
+
+		virtual operator bool*() { return 0; }
+		virtual operator int*() { return 0; }
+		virtual operator double*() { return 0; }
+		virtual void set(const char *) {}
+		virtual void set(std::string &k) {}
+		virtual std::string get() { return ""; }; // no good!
+	};
+	struct nonequery : emptyquery {
+		virtual visit_type kind() { return vt_none; }
+	};
+
+	template<typename F>
+	struct typedquery : query {
+		F *p;
+		typedquery(F *f) {
+			p=f;
+		}
+		virtual visit_type kind() { return vt_object; }
+		virtual void all(std::function<void(std::string&,query&)> qt) {
+			member_provider *fp=p->rpoco_type_info_get();
+			for (int i=0;i<fp->size();i++) {
+				member* mp=(*fp)[i];
+				mp->query([&qt,&mp](query& q){ qt(mp->name(),q);  },p);
+			}
+		}
+		virtual bool find(std::string & name,std::function<void(query&)> qt) {
+			member_provider *fp=p->rpoco_type_info_get();
+			if (!fp->has(name))
+				return false;
+			(*fp)[name]->query(qt,p);
+			return true;
+		}
+		virtual void add(std::string & name,std::function<void(query&)> q) {
+			nonequery nq;
+			q(nq);
+		}
+
+		virtual void all(std::function<void(int,query&)>) {}
+		virtual bool at(std::string & name,std::function<void(query&)>) {
+			return false;
+		}
+		virtual void add(std::function<void(query&)> q) {
+			nonequery nq;
+			q(nq);
+		}
+
+		virtual operator bool*() { return 0; }
+		virtual operator int*() { return 0; }
+		virtual operator double*() { return 0; }
+		virtual void set(const char *) {}
+		virtual void set(std::string &k) {}
+		virtual std::string get() { return ""; }; // no good!
+	};
+
+	template<typename F>
+	struct typedquery<std::vector<F>> : emptyquery {
+		std::vector<F> *p;
+		typedquery(std::vector<F> *v) {
+			p=v;
+		}
+		virtual visit_type kind() { return vt_array; }
+	};
+
+	template<>
+	struct typedquery<std::string> : emptyquery {
+		std::string *p;
+		typedquery(std::string *str) {
+			p=str;
+		}
+
+		virtual visit_type kind() { return vt_string; }
+		virtual void set(const char *cp) {
+			(*p)=std::string(cp);
+		}
+		virtual void set(std::string &k) {
+			(*p)=k;
+		}
+		virtual std::string get() { return *p; }; // no good!
+	};
+	
+	template<>
+	struct typedquery<int> : emptyquery {
+		int *ip;
+		typedquery(int *iv) {
+			ip=iv;
+		}
+		virtual visit_type kind() { return vt_number; }
+		virtual operator int*() {
+			return ip;
+		} 
+	};
+
+	template<int N>
+	struct typedquery<char[N]> : emptyquery {
+		char (*p)[N];
+		typedquery(char (*ip)[N]) {
+		
+		}
+		virtual visit_type kind() { return vt_string; }
+		virtual void set(const char *cp) {
+			if (!cp)
+				return;
+			size_t inLen=strlen(cp);
+			if (inLen>=N)
+				inLen=N-1;
+			memcpy(*p,cp,inLen);
+			(*p)[inLen]=0;
+		}
+		virtual void set(std::string &k) {
+			set(k.data());
+		}
+		virtual std::string get() {
+			return std::string(*p);
+		}
+	};
+
+	template<typename F>
+	struct typedquery<F *> : query {
+		F* *p;
+		std::unique_ptr<typedquery<F>> sq;
+
+		// TODO
+		typedquery(F **v) {
+			p=v;
+			if (*p)
+				sq=std::make_unique<typedquery<F>>(*p);
+		}
+		virtual visit_type kind() {
+			if (*p) {
+				return (*sq).kind();
+			} else {
+				return vt_null;
+			}
+		}
+
+		virtual void all(std::function<void(std::string&,query&)>) {
+			// TODO
+		}
+		virtual bool find(std::string & name,std::function<void(query&)>) {
+			// TODO
+			return false;
+		}
+		virtual void add(std::string & name,std::function<void(query&)>) {
+			// TODO
+		}
+
+		virtual void all(std::function<void(int,query&)>) {
+			// TODO
+		}
+		virtual bool at(std::string & name,std::function<void(query&)>) {
+			// TODO
+			return false;
+		}
+		virtual void add(std::function<void(query&)>) {
+			// TODO
+		}
+
+		virtual operator int*() {
+			if (*p)
+				return *sq;
+			return nullptr;
+		}
+		virtual operator double*() {
+			if (*p)
+				return *sq;
+			return nullptr;
+		}
+		virtual std::string get() {
+			if (*p)
+				return (*sq).get();
+			return "";
+		}
+
+		virtual void set(const char *s) {
+			if (*p)
+				(*sq).set(s);
+		}
+		virtual void set(std::string &s) {
+			if (*p)
+				(*sq).set(s);
+		}
+		virtual operator bool*() {
+			if (*p)
+				return *sq;
+			return nullptr;
+		}
+	};
+
+
+	template<typename F>
+	typedquery<F> make_query(F &f) {
+		return typedquery<F>(&f);
+	}
 
 	// generic class type visitation template functionality.
 	// if an object wants to override to handle multiple types a specialization
@@ -271,6 +507,7 @@ namespace rpoco {
 			return m_name;
 		}
 		virtual void visit(visitor &v,void *p)=0;
+		virtual void query(std::function<void(query&) >,void* )=0;
 	};
 
 	// field class template for the actual members (see the RPOCO macro for usage)
@@ -286,6 +523,11 @@ namespace rpoco {
 		}
 		virtual void visit(visitor &v,void *p) {
 			rpoco::visit<F>(v,*(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ));
+		}
+		virtual void query( std::function<void(rpoco::query&) > qt,void *p) {
+			//auto q=make_query( *(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ) );
+			typedquery<F> q( (F*)( (uintptr_t)p+(ptrdiff_t)m_offset ) );
+			qt(q);
 		}
 	};
 
