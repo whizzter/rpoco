@@ -1,6 +1,20 @@
 // This header file provides the RPOCO macro and runtime system that creates 
 // template specialized runtime type data usable for serialization and similar tasks.
 
+// NOTICE: the design of RPOCO is still in flux so preferably depend on the
+//          built in serialization functionality if possible.
+
+// There are currently 2 ways to use the RPOCO reflection
+// 1: the visitor system
+// 2: the query system
+
+// The visitor system is smaller and probably faster and is also designed to
+// support both consumption of data and production. It is thus suitable for
+// data parsing,etc. (see the json parser for an example).
+//
+// The query api however gives access to query objects along the way and
+// is more suitable for situations where control flow can vary such as
+// with a template renderer. (see the mustache renderer for an example)
 
 #ifndef __INCLUDED_RPOCO_HPP__
 #define __INCLUDED_RPOCO_HPP__
