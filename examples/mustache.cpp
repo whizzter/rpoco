@@ -25,13 +25,13 @@ int main(int argc,char **argv) {
 	Store data;
 
 	// sample data
-	std::string sampleText="{ \"name\":\"Acme Store\" , \"emp\":[{\"name\":\"John Doe\",\"age\":12,\"child\":true,\"loyalty\":0.9},{\"name\":\"Jane Doe\",\"age\":34,\"child\":false,\"loyalty\":0.3] }";
+	std::string sampleText="{ \"name\":\"Acme Store\" , \"emp\":[{\"name\":\"John Doe\",\"age\":12,\"child\":true,\"loyalty\":0.9},{\"name\":\"Jane Doe\",\"age\":34,\"child\":false,\"loyalty\":0.3},{\"name\":\"Bobby <>&\\\"' Tables\",\"age\":34,\"child\":false,\"loyalty\":0.01}] }";
 
 	// parse in data
 	rpocojson::parse(sampleText,data);
 
 	// template
-	std::string tpl="Store:{{name}} {{#emp}}[{{name}} aged {{age}} is a {{#child}}child{{/child}}{{^child}}parent{{/child}} with loyalty {{loyalty}}]{{/emp}}";
+	std::string tpl="Store:{{name}} {{#emp}}[escaped:{{name}} unescaped:{{{name}}} aged {{age}} is a {{#child}}child{{/child}}{{^child}}parent{{/child}} with loyalty {{loyalty}}]{{/emp}}";
 
 	// render template with object data
 	auto outputText=rpoco::mustache::parse(tpl).render(data);

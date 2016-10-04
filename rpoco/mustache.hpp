@@ -17,6 +17,12 @@ namespace rpoco {
 		// later be rendered out to an expanded structure from RPOCO structures.
 		multifragment parse(std::string &src);
 		
+		static void dumpchars(std::function<void(char)> &f,const char *buf,int sz) {
+			for (int i=0;i<sz;i++) {
+				f(buf[i]);
+			}
+		}
+		
 		// fragment is the basic type of nodes from the mustache template
 		class fragment {
 			friend multifragment parse(std::string &src);
@@ -62,25 +68,47 @@ namespace rpoco {
 		class valuefragment : public fragment {
 			friend multifragment parse(std::string &src);
 			std::string valuename;
+			bool escape;
 		public:
 			virtual void renderFragment(std::function<void(char)> &out, std::vector<rpoco::query*> &q){
 				bool found=false;
 				for (int i=q.size()-1;!found && i>=0;i--) {
-					q[i]->find(valuename,[&found,&out](rpoco::query &vq){
+					q[i]->find(valuename,[this,&found,&out](rpoco::query &vq){
 						found=true;
 						if (vq.kind()==rpoco::vt_string) {
 							std::string strval=vq.get();
-							for (int i=0;i<strval.size();i++)
-								out(strval[i]);
+							if (!escape)
+								dumpchars(out,strval.data(),strval.size());
+							else
+								for (int i=0;i<strval.size();i++) {
+									switch(strval[i]) {
+									case '<' :
+										dumpchars(out,"&lt;",4);
+										break;
+									case '>' :
+										dumpchars(out,"&gt;",4);
+										break;
+									case '\"' :
+										dumpchars(out,"&quot;",6);
+										break;
+									case '\'' :
+										dumpchars(out,"&#039;",6);
+										break;
+									case '&' :
+										dumpchars(out,"&amp;",5);
+										break;
+									default:
+										out(strval[i]);
+										break;
+									}
+								}
 						} else if (vq.kind()==rpoco::vt_number) {
 							if (int *ip=vq) {
 								auto is=std::to_string(*ip);
-								for (int i=0;i<is.size();i++)
-									out(is[i]);
+								dumpchars(out,is.c_str(),is.size());
 							} else if (double *dp=vq) {
 								auto ds=std::to_string(*dp);
-								for (int i=0;i<ds.size();i++)
-									out(ds[i]);
+								dumpchars(out,ds.c_str(),ds.size());
 							}
 						} else {
 							printf("Vt kind:%d not handled\n",vq.kind());
@@ -149,8 +177,7 @@ namespace rpoco {
 		public:
 			//virtual ~textfragment(){}
 			virtual void renderFragment(std::function<void(char)> &out, std::vector<rpoco::query*> &q){
-				for (int i=0;i<data.size();i++)
-					out(data[i]);
+				dumpchars(out,data.data(),data.size());
 			}
 		};
 		
@@ -159,6 +186,7 @@ namespace rpoco {
 			multifragment parsed;
 			std::string beginTag="{{";
 			std::string endTag="}}";
+			std::string ueEndTag="}}}";
 			fragment *cur=&parsed;
 			bool multistate=true;
 			
@@ -172,12 +200,12 @@ namespace rpoco {
 							return parsed;
 						}
 						char kind=src[i];
-						if (kind=='#' || kind=='!' || kind=='^' || kind=='/') {
+						if (kind=='#' || kind=='!' || kind=='^' || kind=='/' || kind=='{') {
 							i++;
 						} else {
 							kind=0;
 						}
-						size_t end=src.find(endTag,i);
+						size_t end=src.find(kind=='{'?ueEndTag:endTag,i);
 						if (std::string::npos==end) {
 							// Mark end somehow?!
 							printf("End tag not found!!\n");
@@ -185,8 +213,10 @@ namespace rpoco {
 						} else {
 							std::string tag=src.substr(i,end-i);
 							switch(kind) {
+							case '{' :
 							case 0 : {
 									valuefragment * pvf=new valuefragment();
+									pvf->escape=kind==0;
 									pvf->valuename=tag;
 									pvf->parent=cur;
 									std::shared_ptr<fragment> valuefrag(pvf);
