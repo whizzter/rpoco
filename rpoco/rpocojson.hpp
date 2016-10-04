@@ -1,5 +1,5 @@
 // This header provides dynamic and templatized JSON serialization on
-// top of the RPOCO type information.16_
+// top of the RPOCO type information.
 
 #ifndef __INCLUDED_RPOCOJSON_HPP__
 #define __INCLUDED_RPOCOJSON_HPP__

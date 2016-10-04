@@ -94,13 +94,14 @@ namespace rpoco {
 			return find(nm,qt);
 		}
 
+		virtual int size()=0;
 
 		virtual void all(std::function<void(std::string&,query&)>)=0;
 		virtual bool find(std::string & name,std::function<void(query&)>)=0;
 		virtual void add(std::string & name,std::function<void(query&)>)=0;
 
 		virtual void all(std::function<void(int,query&)>)=0;
-		virtual bool at(std::string & name,std::function<void(query&)>)=0;
+		virtual bool at(int idx,std::function<void(query&)>)=0;
 		virtual void add(std::function<void(query&)>)=0;
 
 		virtual operator bool*() = 0 ;
@@ -112,6 +113,7 @@ namespace rpoco {
 	};
 
 	struct emptyquery : query {
+		virtual int size() { return 0; }
 		virtual void all(std::function<void(std::string&,query&)>) {}
 		virtual bool find(std::string & name,std::function<void(query&)>) {
 			return false;
@@ -121,7 +123,7 @@ namespace rpoco {
 		}
 
 		virtual void all(std::function<void(int,query&)>) {}
-		virtual bool at(std::string & name,std::function<void(query&)>) {
+		virtual bool at(int idx,std::function<void(query&)>) {
 			return false;
 		}
 		virtual void add(std::function<void(query&)> q) {
@@ -133,7 +135,7 @@ namespace rpoco {
 		virtual operator double*() { return 0; }
 		virtual void set(const char *) {}
 		virtual void set(std::string &k) {}
-		virtual std::string get() { return ""; }; // no good!
+		virtual std::string get() { return std::string("empty"); }; // no good!
 	};
 	struct nonequery : emptyquery {
 		virtual visit_type kind() { return vt_none; }
@@ -146,6 +148,7 @@ namespace rpoco {
 			p=f;
 		}
 		virtual visit_type kind() { return vt_object; }
+		virtual int size() { return 0; }
 		virtual void all(std::function<void(std::string&,query&)> qt) {
 			member_provider *fp=p->rpoco_type_info_get();
 			for (int i=0;i<fp->size();i++) {
@@ -166,7 +169,7 @@ namespace rpoco {
 		}
 
 		virtual void all(std::function<void(int,query&)>) {}
-		virtual bool at(std::string & name,std::function<void(query&)>) {
+		virtual bool at(int idx,std::function<void(query&)>) {
 			return false;
 		}
 		virtual void add(std::function<void(query&)> q) {
@@ -179,7 +182,7 @@ namespace rpoco {
 		virtual operator double*() { return 0; }
 		virtual void set(const char *) {}
 		virtual void set(std::string &k) {}
-		virtual std::string get() { return ""; }; // no good!
+		virtual std::string get() { return std::string("Obj"); }; // no good!
 	};
 
 	template<typename F>
@@ -189,6 +192,27 @@ namespace rpoco {
 			p=v;
 		}
 		virtual visit_type kind() { return vt_array; }
+		virtual int size() {
+			return p->size();
+		}
+		virtual void all(std::function<void(int,query&)> qc) {
+			for (int i=0;i<p->size();i++) {
+				typedquery<F> tq( &(p->at(i)) );
+//				auto tnf= typeid(F).name();
+//				printf("Iterating over type:%s age:%d (at %p, name at %p) qptr:%p\n",tnf,(int)p->at(i).child,
+//					&(p->at(i).age),
+//					&(p->at(i).name),
+//					&tq);
+				qc(i,tq);
+			}
+		}
+		virtual bool at(int idx,std::function<void(query&)> qc) {
+			if (idx>=0 && idx<p->size()) {
+				typedquery<F> tq( p->data()+idx );
+				qc(tq);
+			}
+			return false;
+		}
 	};
 
 	template<>
@@ -205,7 +229,9 @@ namespace rpoco {
 		virtual void set(std::string &k) {
 			(*p)=k;
 		}
-		virtual std::string get() { return *p; }; // no good!
+		virtual std::string get() {
+			return *p;
+		}
 	};
 	
 	template<>
@@ -220,11 +246,35 @@ namespace rpoco {
 		} 
 	};
 
+	template<>
+	struct typedquery<double> : emptyquery {
+		double *dp;
+		typedquery(double *dv) {
+			dp=dv;
+		}
+		virtual visit_type kind() { return vt_number; }
+		virtual operator double*() {
+			return dp;
+		}
+	};
+
+	template<>
+	struct typedquery<bool> : emptyquery {
+		bool *bp;
+		typedquery(bool *bv) {
+			bp=bv;
+		}
+		virtual visit_type kind() { return vt_bool; }
+		virtual operator bool*() {
+			return bp;
+		}
+	};
+
 	template<int N>
 	struct typedquery<char[N]> : emptyquery {
 		char (*p)[N];
 		typedquery(char (*ip)[N]) {
-		
+			p=ip;
 		}
 		virtual visit_type kind() { return vt_string; }
 		virtual void set(const char *cp) {
@@ -240,7 +290,10 @@ namespace rpoco {
 			set(k.data());
 		}
 		virtual std::string get() {
-			return std::string(*p);
+			int len=0;
+			while(len<N && (*p)[len])
+				len++;
+			return std::string(*p,len);
 		}
 	};
 
@@ -474,6 +527,12 @@ namespace rpoco {
 	template<> struct visit<int> {
 		visit(visitor &v,int &ip) {
 			v.visit(ip);
+		}
+	};
+
+	template<> struct visit<bool> {
+		visit(visitor &v,bool &bp) {
+			v.visit(bp);
 		}
 	};
 
