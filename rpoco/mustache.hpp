@@ -24,6 +24,10 @@ namespace rpoco {
 			
 			bool resolve(std::string &name,std::function<void(rpoco::query&)> q) {
 				bool found=false;
+				if (name==".") {
+					q(*rstack.back());
+					return true;
+				}
 				for (int i=rstack.size()-1;!found && i>=0;i--) {
 					found=rstack[i]->find(name,q);
 				}
