@@ -1,4 +1,4 @@
-// First very simple example of parsing and writing JSON data
+// Mustache template rendering sample
 
 #include <rpoco/rpocojson.hpp>
 #include <rpoco/mustache.hpp>
@@ -30,11 +30,25 @@ int main(int argc,char **argv) {
 	// parse in data
 	rpocojson::parse(sampleText,data);
 
-	// template
-	std::string tpl="Store:{{name}} {{#emp}}[escaped:{{name}} unescaped:{{{name}}} aged {{age}} is a {{#child}}child{{/child}}{{^child}}parent{{/child}} with loyalty {{loyalty}}]{{/emp}}";
+	// main template
+	std::string mtpl="Store:{{name}} {{#emp}}{{> usertpl}}{{/emp}}";
+
+	// user template via partial
+	std::string usertpl="[escaped:{{name}} unescaped:{{{name}}} aged {{age}} is a {{#child}}child{{/child}}{{^child}}parent{{/child}} with loyalty {{loyalty}}]";
+
+	// parse the partial template
+	auto usertplfrag=rpoco::mustache::parse(usertpl);
+
+	// create a partial resolver to support the rendering function (this could be more advanced and support f.ex. file loading)
+	std::function<rpoco::mustache::multifragment*(std::string &name)> partialresolver=[&](std::string &partname){
+		if (partname=="usertpl")
+			return &usertplfrag;
+		else
+			return (rpoco::mustache::multifragment*)nullptr;
+	};
 
 	// render template with object data
-	auto outputText=rpoco::mustache::parse(tpl).render(data);
+	auto outputText=rpoco::mustache::parse(mtpl).render(data,partialresolver);
 
 	// and print it
 	printf("%s",outputText.c_str());

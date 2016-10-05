@@ -17,11 +17,24 @@ namespace rpoco {
 		// later be rendered out to an expanded structure from RPOCO structures.
 		multifragment parse(std::string &src);
 		
-		static void dumpchars(std::function<void(char)> &f,const char *buf,int sz) {
-			for (int i=0;i<sz;i++) {
-				f(buf[i]);
+		struct rendercontext {
+			std::vector<rpoco::query*> rstack;
+			std::function<void(char)> *out;
+			std::function<multifragment*(std::string &name)> pfinder;
+			
+			bool resolve(std::string &name,std::function<void(rpoco::query&)> q) {
+				bool found=false;
+				for (int i=rstack.size()-1;!found && i>=0;i--) {
+					found=rstack[i]->find(name,q);
+				}
+				return found;
 			}
-		}
+			void dumpchars(const char *buf,int sz) {
+				for (int i=0;i<sz;i++) {
+					(*out)(buf[i]);
+				}
+			}
+		};
 		
 		// fragment is the basic type of nodes from the mustache template
 		class fragment {
@@ -30,23 +43,27 @@ namespace rpoco {
 			// all fragment nodes has a parent pointer (mostly used during parsing)
 			fragment *parent;
 		public:
-			virtual ~fragment() {};
+			//fragment(const fragment& src)=delete;
+			//fragment& operator=(const fragment& src)=delete;
+			virtual ~fragment() = default;
 
 			// the renderFragment function is overriden by fragment nodes and called
 			// recursively during template rendering, if custom output is wanted
 			// instead of a string like in the render helper then just implement the
 			// lambda function and push out characters somewhere else.
-			virtual void renderFragment(std::function<void(char)> &out, std::vector<rpoco::query*> &q)=0;
+			virtual void renderFragment(rendercontext *)=0;
 			
 			// a render helper function that dumps all characters to a string that
 			// can then be used.
-			template <typename T> std::string render(T &data) {
+			template <typename T> std::string render(T &data,std::function<multifragment*(std::string &name)> pres=std::function<multifragment*(std::string &name)>() ) {
 				std::string out;
 				auto query=rpoco::make_query(data);
-				std::vector<rpoco::query*> querystack;
-				querystack.push_back(&query);
+				rendercontext ctx;
+				ctx.rstack.push_back(&query);
 				std::function<void(char)> outfun=[&out](char c){ out.push_back(c); };
-				this->renderFragment(outfun,querystack);
+				ctx.out=&outfun;
+				ctx.pfinder=pres;
+				this->renderFragment(&ctx);
 				return out;
 			}
 		};
@@ -56,10 +73,16 @@ namespace rpoco {
 			friend multifragment parse(std::string &src);
 			std::vector<std::shared_ptr<fragment>> sub;
 		public:
-			//virtual ~multifragment(){}
-			virtual void renderFragment(std::function<void(char)> &out, std::vector<rpoco::query*> &q){
+			multifragment()=default;
+			multifragment(const multifragment& src)=default;
+			multifragment& operator=(const multifragment& src)=default;
+			multifragment(multifragment &&src)=default;
+			multifragment& operator=(multifragment &&src)=default;
+			virtual ~multifragment()=default;
+
+			virtual void renderFragment(rendercontext *ctx){
 				for (int i=0;i<sub.size();i++) {
-					sub[i]->renderFragment(out,q);
+					sub[i]->renderFragment(ctx);
 				}
 			}
 		};
@@ -70,51 +93,54 @@ namespace rpoco {
 			std::string valuename;
 			bool escape;
 		public:
-			virtual void renderFragment(std::function<void(char)> &out, std::vector<rpoco::query*> &q){
-				bool found=false;
-				for (int i=q.size()-1;!found && i>=0;i--) {
-					q[i]->find(valuename,[this,&found,&out](rpoco::query &vq){
-						found=true;
+			virtual ~valuefragment()=default;
+			virtual void renderFragment(rendercontext *ctx){
+				//bool found=false;
+				//for (int i=q.size()-1;!found && i>=0;i--) {
+					//q[i]->find(valuename,
+				ctx->resolve(valuename,
+					[this,&ctx](rpoco::query &vq){
+					//	found=true;
 						if (vq.kind()==rpoco::vt_string) {
 							std::string strval=vq.get();
 							if (!escape)
-								dumpchars(out,strval.data(),strval.size());
+								ctx->dumpchars(strval.data(),strval.size());
 							else
 								for (int i=0;i<strval.size();i++) {
 									switch(strval[i]) {
 									case '<' :
-										dumpchars(out,"&lt;",4);
+										ctx->dumpchars("&lt;",4);
 										break;
 									case '>' :
-										dumpchars(out,"&gt;",4);
+										ctx->dumpchars("&gt;",4);
 										break;
 									case '\"' :
-										dumpchars(out,"&quot;",6);
+										ctx->dumpchars("&quot;",6);
 										break;
 									case '\'' :
-										dumpchars(out,"&#039;",6);
+										ctx->dumpchars("&#039;",6);
 										break;
 									case '&' :
-										dumpchars(out,"&amp;",5);
+										ctx->dumpchars("&amp;",5);
 										break;
 									default:
-										out(strval[i]);
+										(*ctx->out)(strval[i]);
 										break;
 									}
 								}
 						} else if (vq.kind()==rpoco::vt_number) {
 							if (int *ip=vq) {
 								auto is=std::to_string(*ip);
-								dumpchars(out,is.c_str(),is.size());
+								ctx->dumpchars(is.c_str(),is.size());
 							} else if (double *dp=vq) {
 								auto ds=std::to_string(*dp);
-								dumpchars(out,ds.c_str(),ds.size());
+								ctx->dumpchars(ds.c_str(),ds.size());
 							}
 						} else {
 							printf("Vt kind:%d not handled\n",vq.kind());
 						}
 					});
-				}
+				//}
 			}
 		};
 
@@ -127,20 +153,22 @@ namespace rpoco {
 			bool invert;
 			multifragment sub;
 		public:
-			virtual void renderFragment(std::function<void(char)> &out,std::vector<rpoco::query*> &q) {
-				bool found=false;
-				for(int i=q.size()-1;!found && i>=0;i--) {
-					q[i]->find(ctlname,[&](rpoco::query &vq){
-						found=true;
+			virtual ~ctlfragment()=default;
+			virtual void renderFragment(rendercontext *ctx) {
+				//bool found=false;
+				//for(int i=q.size()-1;!found && i>=0;i--) {
+				
+				bool found=ctx->resolve(ctlname,[&](rpoco::query &vq){
+						//found=true;
 						bool truthy=false;
 						if (vq.kind()==rpoco::vt_array) {
 							if (vq.size() && !invert) {
-								q.push_back(nullptr);
+								ctx->rstack.push_back(nullptr);
 								vq.all([&](int idx,rpoco::query &subq){
-									(q.back())=&subq;
-									sub.renderFragment(out,q);
+									(ctx->rstack.back())=&subq;
+									sub.renderFragment(ctx);
 								});
-								q.pop_back();
+								ctx->rstack.pop_back();
 								return;
 							}
 							truthy = vq.size()!=0;
@@ -160,13 +188,31 @@ namespace rpoco {
 							return; // don't know how to handle this value type
 						}
 						if ( truthy ^ invert ) {
-							sub.renderFragment(out,q);
+							sub.renderFragment(ctx);
 						}
 					});
-				}
+				//}
 				if (invert && !found) {
-					sub.renderFragment(out,q);
+					sub.renderFragment(ctx);
 				}
+			}
+		};
+
+		// partialfragments are fragments that refere to external file fragments
+		class partialfragment : public fragment {
+			friend multifragment parse(std::string &src);
+			std::string name;
+		public:
+			virtual ~partialfragment()=default;
+			virtual void renderFragment(rendercontext *ctx) {
+				if (!ctx->pfinder) {
+					printf("no finder!\n");
+					return;
+				}
+				multifragment *sub=ctx->pfinder(name);
+				if (!sub)
+					return;
+				sub->renderFragment(ctx);
 			}
 		};
 
@@ -175,9 +221,9 @@ namespace rpoco {
 			friend multifragment parse(std::string &src);
 			std::string data;
 		public:
-			//virtual ~textfragment(){}
-			virtual void renderFragment(std::function<void(char)> &out, std::vector<rpoco::query*> &q){
-				dumpchars(out,data.data(),data.size());
+			virtual ~textfragment()=default;
+			virtual void renderFragment(rendercontext *ctx){
+				ctx->dumpchars(data.data(),data.size());
 			}
 		};
 		
@@ -197,10 +243,10 @@ namespace rpoco {
 						//std::cout <<"Tag at:" <<src.substr(i)<<"\n";
 						if (i==src.size()) {
 							printf("PRemature EOF\n");
-							return parsed;
+							return std::move(parsed);
 						}
 						char kind=src[i];
-						if (kind=='#' || kind=='!' || kind=='^' || kind=='/' || kind=='{') {
+						if (kind=='#' || kind=='!' || kind=='^' || kind=='/' || kind=='{' || kind=='>') {
 							i++;
 						} else {
 							kind=0;
@@ -209,37 +255,52 @@ namespace rpoco {
 						if (std::string::npos==end) {
 							// Mark end somehow?!
 							printf("End tag not found!!\n");
-							return parsed;
+							return std::move(parsed);
 						} else {
-							std::string tag=src.substr(i,end-i);
-							switch(kind) {
-							case '{' :
-							case 0 : {
-									valuefragment * pvf=new valuefragment();
-									pvf->escape=kind==0;
-									pvf->valuename=tag;
-									pvf->parent=cur;
-									std::shared_ptr<fragment> valuefrag(pvf);
-									((multifragment*)cur)->sub.push_back(valuefrag);
-								} break;
-							case '#' :
-							case '^' : {
-									ctlfragment * cf=new ctlfragment();
-									cf->ctlname=tag;
-									cf->invert=kind=='^';
-									cf->sub.parent=cf;
-									cf->parent=cur;
-									std::shared_ptr<fragment> ctlfrag(cf);
-									((multifragment*)cur)->sub.push_back(ctlfrag);
-									cur=&(cf->sub);
-								} break;
-							case '/' : {
-									// check for parse error on mismatching tags?
-									cur=cur->parent->parent;
-								} break;
-							default:
-								printf("Unknown kind:%d %c\n",kind,kind);
-								abort();
+							// once the tag kind is known we start trim away spaces from the tag data
+							size_t tst=i,tend=end;
+							while(tst<tend && isspace(src[tst])) tst++;
+							while(tst<tend && isspace(src[tend-1])) tend--;
+							// if there's anything left it's a valid tag.
+							if (tst<tend) {
+								std::string tag=src.substr(tst,tend-tst);
+							
+								switch(kind) {
+								case '{' :
+								case 0 : {
+										valuefragment * pvf=new valuefragment();
+										pvf->escape=kind==0;
+										pvf->valuename=tag;
+										pvf->parent=cur;
+										std::shared_ptr<fragment> valuefrag(pvf);
+										((multifragment*)cur)->sub.push_back(valuefrag);
+									} break;
+								case '#' :
+								case '^' : {
+										ctlfragment * cf=new ctlfragment();
+										cf->ctlname=tag;
+										cf->invert=kind=='^';
+										cf->sub.parent=cf;
+										cf->parent=cur;
+										std::shared_ptr<fragment> ctlfrag(cf);
+										((multifragment*)cur)->sub.push_back(ctlfrag);
+										cur=&(cf->sub);
+									} break;
+								case '>' : {
+										partialfragment *pf=new partialfragment();
+										pf->name=tag;
+										pf->parent=cur;
+										std::shared_ptr<fragment> valuefrag(pf);
+										((multifragment*)cur)->sub.push_back(valuefrag);
+									} break;
+								case '/' : {
+										// check for parse error on mismatching tags?
+										cur=cur->parent->parent;
+									} break;
+								default:
+									printf("Unknown kind:%d %c\n",kind,kind);
+									abort();
+								}
 							}
 							i=end+2;
 							continue;
@@ -267,7 +328,7 @@ namespace rpoco {
 					continue;
 				}
 			}
-			return parsed;
+			return std::move(parsed);
 		}
 	};
 };
