@@ -111,7 +111,7 @@ namespace rpoco {
 		virtual int size()=0;
 
 		virtual void all(std::function<void(std::string&,query&)>)=0;
-		virtual bool find(std::string & name,std::function<void(query&)>)=0;
+		virtual bool find(const std::string & name,std::function<void(query&)>)=0;
 		virtual void add(std::string & name,std::function<void(query&)>)=0;
 
 		virtual void all(std::function<void(int,query&)>)=0;
@@ -129,7 +129,7 @@ namespace rpoco {
 	struct emptyquery : query {
 		virtual int size() { return 0; }
 		virtual void all(std::function<void(std::string&,query&)>) {}
-		virtual bool find(std::string & name,std::function<void(query&)>) {
+		virtual bool find(const std::string & name,std::function<void(query&)>) {
 			return false;
 		}
 		virtual void add(std::string & name,std::function<void(query&)> q) {
@@ -170,7 +170,7 @@ namespace rpoco {
 				mp->query([&qt,&mp](query& q){ qt(mp->name(),q);  },p);
 			}
 		}
-		virtual bool find(std::string & name,std::function<void(query&)> qt) {
+		virtual bool find(const std::string & name,std::function<void(query&)> qt) {
 			member_provider *fp=p->rpoco_type_info_get();
 			if (!fp->has(name))
 				return false;
@@ -312,40 +312,45 @@ namespace rpoco {
 	};
 
 	template<typename F>
-	struct typedquery<F *> : query {
-		F* *p;
+	struct pointertypedquery : query {
+		F* p;
 		std::unique_ptr<typedquery<F>> sq;
 
-		// TODO
-		typedquery(F **v) {
-			p=v;
-			if (*p)
-				sq=std::make_unique<typedquery<F>>(*p);
-		}
 		virtual visit_type kind() {
-			if (*p) {
+			if (p) {
 				return (*sq).kind();
 			} else {
 				return vt_null;
 			}
 		}
 
-		virtual void all(std::function<void(std::string&,query&)>) {
-			// TODO
+		int size() {
+			if (p)
+				return (*sq).size();
+			else
+				return 0;
 		}
-		virtual bool find(std::string & name,std::function<void(query&)>) {
-			// TODO
+
+		virtual void all(std::function<void(std::string&,query&)> q) {
+			if (p)
+				(*sq).all(q);
+		}
+		virtual bool find(const std::string & name,std::function<void(query&)> q) {
+			if (p)
+				return (*sq).find(name,q);
 			return false;
 		}
 		virtual void add(std::string & name,std::function<void(query&)>) {
 			// TODO
 		}
 
-		virtual void all(std::function<void(int,query&)>) {
-			// TODO
+		virtual void all(std::function<void(int,query&)> q) {
+			if (p)
+				(*sq).all(q);
 		}
-		virtual bool at(std::string & name,std::function<void(query&)>) {
-			// TODO
+		virtual bool at(int idx,std::function<void(query&)> q) {
+			if (p)
+				return (*sq).at(idx,q);
 			return false;
 		}
 		virtual void add(std::function<void(query&)>) {
@@ -353,33 +358,55 @@ namespace rpoco {
 		}
 
 		virtual operator int*() {
-			if (*p)
+			if (p)
 				return *sq;
 			return nullptr;
 		}
 		virtual operator double*() {
-			if (*p)
+			if (p)
 				return *sq;
 			return nullptr;
 		}
 		virtual std::string get() {
-			if (*p)
+			if (p)
 				return (*sq).get();
 			return "";
 		}
 
 		virtual void set(const char *s) {
-			if (*p)
+			if (p)
 				(*sq).set(s);
 		}
 		virtual void set(std::string &s) {
-			if (*p)
+			if (p)
 				(*sq).set(s);
 		}
 		virtual operator bool*() {
-			if (*p)
+			if (p)
 				return *sq;
 			return nullptr;
+		}
+
+	};
+
+	template<typename F>
+	struct typedquery<std::shared_ptr<F>> : pointertypedquery<F> {
+		typedquery(std::shared_ptr<F> *v) {
+			p=v->get();
+			if (p)
+				sq=std::make_unique<typedquery<F>>(p);
+		}
+	};
+
+
+	template<typename F>
+	struct typedquery<F *> : pointertypedquery<F> {
+
+		// TODO
+		typedquery(F **v) {
+			p=*v;
+			if (p)
+				sq=std::make_unique<typedquery<F>>(p);
 		}
 	};
 

@@ -17,7 +17,19 @@ namespace rpoco {
 		// later be rendered out to an expanded structure from RPOCO structures.
 		multifragment parse(std::string &src);
 		
-		struct rendercontext {
+		class rendercontext {
+			std::function<void(rpoco::query&)> makeaccessor(std::function<void(rpoco::query&)> q,std::string name) {
+				return [this,q,name](rpoco::query& cur) {
+					size_t dotpos=name.find('.');
+					if (dotpos!=std::string::npos) {
+						auto sub=makeaccessor(std::move(q),name.substr(dotpos+1));
+						cur.find(name.substr(0,dotpos),sub);
+					} else {
+						cur.find(name,q);
+					}
+				};
+			}
+		public:
 			std::vector<rpoco::query*> rstack;
 			std::function<void(char)> *out;
 			std::function<multifragment*(std::string &name)> pfinder;
@@ -27,6 +39,11 @@ namespace rpoco {
 				if (name==".") {
 					q(*rstack.back());
 					return true;
+				}
+				size_t dotpos=name.find('.');
+				if (dotpos!=std::string::npos) {
+					q=makeaccessor(std::move(q),name.substr(dotpos+1));
+					name=name.substr(0,dotpos);
 				}
 				for (int i=rstack.size()-1;!found && i>=0;i--) {
 					found=rstack[i]->find(name,q);
