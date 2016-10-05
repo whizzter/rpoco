@@ -46,19 +46,12 @@
 // Note 2: This lib uses ptrdiffed offsets to place fields at runtime
 
 #define RPOCO(...) \
-	void rpoco_type_info_expand(rpoco::type_info *ti,std::vector<std::string>& names,int idx) {} \
-	template<typename H,typename... R> \
-	void rpoco_type_info_expand(rpoco::type_info *ti,std::vector<std::string>& names,int idx,H& head,R&... rest) {\
-		ptrdiff_t off=(ptrdiff_t) (  ((uintptr_t)&head)-((uintptr_t)this) ); \
-		ti->add(new rpoco::field< std::remove_reference<H>::type >(names[idx],off) );\
-		rpoco_type_info_expand(ti,names,idx+1,rest...); \
-	} \
 	rpoco::type_info* rpoco_type_info_get() { \
 		static rpoco::type_info ti; \
 		if(!ti.is_init()) { \
 			ti.init([this](rpoco::type_info *ti) { \
 				std::vector<std::string> names=rpoco::extract_macro_names(#__VA_ARGS__); \
-				rpoco_type_info_expand(ti,names,0,__VA_ARGS__); \
+				rpoco_type_info_expand(ti,(uintptr_t)this,names,0,__VA_ARGS__); \
 			} ); \
 		} \
 		return &ti; \
@@ -68,6 +61,7 @@
 namespace rpoco {
 	class member;
 	class member_provider;
+
 
 	struct niltarget {};
 
@@ -675,6 +669,54 @@ namespace rpoco {
 		}
 	};
 
+	template<typename T>
+	struct taginfo {
+		uintptr_t m_ref;
+		std::vector<const char*> tags;
+		taginfo(T &m,std::initializer_list<const char*> infoinit) : m_ref( (uintptr_t)&m ),tags(infoinit) {
+		//	m_ref=(uintptr_t)&m;
+		//	printf("Target:%p me:%p\n",&m,this);
+			//std::initializer_list<const char*> l={info...};
+		//	for(auto tg:tags) {
+		//		printf("Given tag:%s\n",tg);
+		//	}
+		}
+		uintptr_t ref() { return m_ref; }
+	};
+
+	template<typename T,typename ...I>
+	taginfo<T> tag(T &m,I... info) {
+		return std::move( taginfo<T>(m,{info...}) );
+	}
+
+	template<typename T>
+	struct rpoco_type_info_expand_member {
+		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,T &m) {
+			ptrdiff_t off=(ptrdiff_t) (  ((uintptr_t)&m)-_ths );
+			ti->add(new rpoco::field< std::remove_reference<T>::type >(names[idx],off) );
+		}
+	};
+	
+	template<typename T>
+	struct rpoco_type_info_expand_member<taginfo<T>> {
+		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,taginfo<T> &m) {
+			std::string &name=names[idx];
+			ptrdiff_t off=(ptrdiff_t) (  m.ref() -_ths );
+			//printf("%s at %x\n",name.data(),off);
+			//for(auto tag:m.tags) {
+			//	printf("%s has tag %s\n",name.data(),tag);
+			//}
+			ti->add(new rpoco::field< std::remove_reference<T>::type >(name,off) );
+		}
+	};
+
+	void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx) {}
+	template<typename H,typename... R>
+	void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx,H& head,R&... rest) {
+		rpoco_type_info_expand_member<H>(ti,_ths,names,idx,head);
+		rpoco_type_info_expand(ti,_ths,names,idx+1,rest...);
+	}
+
 	// helper function to the RPOCO macro to parse the data
 	static std::vector<std::string> extract_macro_names(const char *t) {
 		// skip spaces and commas
@@ -683,9 +725,33 @@ namespace rpoco {
 		const char *s=t;
 		// the vector of output names
 		std::vector<std::string> out;
-		// small loop to extract tokens from non-space/comma characters
+		// parsing loop to extract tokens
 		while(*t) {
-			if (*t==','||std::isspace(*t)) {
+			if (*t=='(') {
+				t++; // skip first paren
+				// some kind of tag information, we don't particularly care for what is
+				// used to create the tag info here so we will ignore that and instead
+				// take the first name inside it.
+				while(*t&& std::isspace(*t)) { t++; }
+				s=t;
+				// now size the name itself
+				while(*t&&!(std::isspace(*t)||*t==',')) { t++; }
+				// and record it
+				out.push_back(std::string(s,t-s));
+				// now we will skip all extra info
+				bool inArg=false;
+				while(*t) {
+					if (!inArg && *t==')')
+						break;
+					if (*t=='\"')
+						inArg=!inArg;
+					t++;
+				}
+				t++;
+				// skip trailing spaces and commas
+				while(*t&&(std::isspace(*t)||*t==',')) { t++; }
+				s=t;
+			} else if (*t==','||std::isspace(*t)) {
 				out.push_back(std::string(s,t-s));
 				// skip spaces and commas
 				while(*t&&(std::isspace(*t)||*t==',')) { t++; }
