@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <atomic>
@@ -204,7 +205,7 @@ namespace rpoco {
 			return p->size();
 		}
 		virtual void all(std::function<void(int,query&)> qc) {
-			for (int i=0;i<p->size();i++) {
+			for (size_t i=0;i<p->size();i++) {
 				typedquery<F> tq( &(p->at(i)) );
 //				auto tnf= typeid(F).name();
 //				printf("Iterating over type:%s age:%d (at %p, name at %p) qptr:%p\n",tnf,(int)p->at(i).child,
@@ -215,11 +216,54 @@ namespace rpoco {
 			}
 		}
 		virtual bool at(int idx,std::function<void(query&)> qc) {
-			if (idx>=0 && idx<p->size()) {
+			if (idx>=0 && idx<(int)p->size()) {
 				typedquery<F> tq( p->data()+idx );
 				qc(tq);
 			}
 			return false;
+		}
+	};
+
+	template<typename ...TUP>
+	struct typedquery<std::tuple<TUP...>> : emptyquery {
+		std::tuple<TUP...> *p;
+		typedquery(std::tuple<TUP...> *t) {
+			p=t;
+		}
+		virtual visit_type kind() { return vt_array; }
+		virtual int size() {
+			return std::tuple_size<std::tuple<TUP...>>::value;
+		}
+		virtual void all(std::function<void(int,query&)> qc) {
+			tupall<0, std::tuple<TUP...>, TUP...>(qc);
+		}
+
+		template<int N, typename T>
+		void tupall(std::function<void(int, query&)> &qc) { }
+
+		template<int N, typename T, typename H, typename ...R>
+		void tupall(std::function<void(int, query&)> &qc) {
+			typedquery<H> tq(&std::get<N>(*p));
+			qc(N,tq);
+			tupall<N+1, T, R...>(qc);
+		}
+
+		virtual bool at(int idx,std::function<void(query&)> qc) {
+			tupat<0, std::tuple<TUP...>, TUP...>(idx,qc);
+			return false;
+		}
+
+		template<int N,typename T>
+		void tupat(int idx, std::function<void(query&)> &qc) { }
+
+		template<int N,typename T,typename H,typename ...R>
+		void tupat(int idx, std::function<void(query&)> &qc) {
+			if (idx == N) {
+				typedquery<H> tq(&std::get<N>(*p));
+				qc(tq);
+			} else {
+				tupat<N+1, T, R...>(idx, qc);
+			}
 		}
 	};
 
@@ -517,6 +561,45 @@ namespace rpoco {
 			v.produce_end(vt_array);
 		}
 	}};
+
+	template<typename ...TUP>
+	struct visit<std::tuple<TUP...>> {
+		visit(visitor &v, std::tuple<TUP...> &tp) {
+			int i=0;
+			if (v.consume(vt_array, [&v, &tp,&i](std::string& x) {
+				consume<0, std::tuple<TUP...>,TUP...>(v,tp,i);
+				i++;
+			})) {
+				return;
+			} else {
+				v.produce_start(vt_array);
+				produce<0, std::tuple<TUP...>, TUP...>(v, tp);
+				v.produce_end(vt_array);
+			}
+		}
+
+		template<int N,typename T>
+		static void consume(visitor &v,T &tuple,int idx) {
+			niltarget nt;
+			rpoco::visit<niltarget>(v, nt);
+		}
+		template<int N,typename T,typename H,typename ...R>
+		static void consume(visitor &v, T &tuple,int idx) {
+			if (idx == N) {
+				rpoco::visit<H>(v,std::get<N>(tuple));
+			} else {
+				consume<N + 1, T,R...>(v,tuple,idx);
+			}
+		}
+
+		template<int N,typename T>
+		static void produce(visitor &v, T &tuple) {}
+		template<int N, typename T, typename H, typename ...R>
+		static void produce(visitor &v,T &tuple) {
+			rpoco::visit<H>(v,std::get<N>(tuple));
+			produce<N + 1, T, R...>(v, tuple);
+		}
+	};
 
 
 	// the pointer visitor creates a new object of the specified type
