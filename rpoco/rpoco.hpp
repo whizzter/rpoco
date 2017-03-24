@@ -34,8 +34,8 @@
 #include <type_traits>
 #include <functional>
 #include <memory>
-
-#include <iostream>
+#include <string.h>
+#include <cstddef>
 
 // Use the RPOCO macro within a compound definition to create
 // automatic serialization information upon the specified members.
@@ -149,6 +149,32 @@ namespace rpoco {
 	struct nonequery : emptyquery {
 		virtual visit_type kind() { return vt_none; }
 	};
+
+	// a generic member provider class
+	class member_provider {
+	public:
+		virtual int size()=0; // number of members
+		virtual bool has(std::string id)=0; // do we have the requested member?
+		virtual member*& operator[](int idx)=0; // get an indexed member (0-size() are valid indexes)
+		virtual member*& operator[](std::string id)=0; // get a named member
+	};
+	// base class for class members, gives a name and provides an abstract visitation function
+	class member {
+	public:
+	protected:
+		std::string m_name;
+	public:
+		member(std::string name) {
+			this->m_name=name;
+		}
+		std::string& name() {
+			return m_name;
+		}
+		virtual void visit(visitor &v,void *p)=0;
+		virtual void query(std::function<void(query&) >,void* )=0;
+	};
+
+
 
 	template<typename F>
 	struct typedquery : query {
@@ -430,21 +456,29 @@ namespace rpoco {
 	template<typename F>
 	struct typedquery<std::shared_ptr<F>> : pointertypedquery<F> {
 		typedquery(std::shared_ptr<F> *v) {
-			p=v->get();
-			if (p)
-				sq=std::make_unique<typedquery<F>>(p);
+			this->p=v->get();
+			if (this->p)
+#if __cplusplus >= 201402L || _MSC_VER>=1900
+				this->sq=std::make_unique<typedquery<F>>(this->p);
+#else
+				this->sq=std::unique_ptr<typedquery<F>>(new typedquery<F>(this->p));
+#endif
 		}
 	};
 
 
 	template<typename F>
-	struct typedquery<F *> : pointertypedquery<F> {
+	struct typedquery<F *> : public pointertypedquery<F> {
 
 		// TODO
 		typedquery(F **v) {
-			p=*v;
-			if (p)
-				sq=std::make_unique<typedquery<F>>(p);
+			this->p=*v;
+			if (this->p)
+#if __cplusplus >= 201402L || _MSC_VER>=1900
+				this->sq=std::make_unique<typedquery<F>>(this->p);
+#else
+				this->sq=std::unique_ptr<typedquery<F>>(new typedquery<F>(this->p));
+#endif
 		}
 	};
 
@@ -453,6 +487,9 @@ namespace rpoco {
 	typedquery<F> make_query(F &f) {
 		return typedquery<F>(&f);
 	}
+
+	// predeclaration of dummy visitor when we consume unknown data.
+	inline void visit_nil(visitor &v);
 
 	// generic class type visitation template functionality.
 	// if an object wants to override to handle multiple types a specialization
@@ -466,8 +503,7 @@ namespace rpoco {
 				// check if the member to consume exists
 				if (! fp->has(n)) {
 					// if not start the nil consumer
-					niltarget nt;
-					rpoco::visit<niltarget>(v,nt);
+					visit_nil(v);
 				} else {
 					// visit member
 					(*fp)[n]->visit(v,(void*)&f);
@@ -539,8 +575,16 @@ namespace rpoco {
 					rpoco::visit<niltarget>(v,ntn);
 				});
 			} break;
+		case vt_none : case vt_error:
+			break;
 		}
 	}};
+
+	// we needed this visit function because clang couldn't specialize for niltarget visitors from the base template
+	inline void visit_nil(visitor &v) {
+		niltarget nt;
+		rpoco::visit<niltarget>(v,nt);
+	}
 
 	// vector visitor, used for arrays
 	template<typename F>
@@ -671,50 +715,25 @@ namespace rpoco {
 		v.visit(str,SZ);
 	}};
 
-	// base class for class members, gives a name and provides an abstract visitation function
-	class member {
-	public:
-	protected:
-		std::string m_name;
-	public:
-		member(std::string name) {
-			this->m_name=name;
-		}
-		std::string& name() {
-			return m_name;
-		}
-		virtual void visit(visitor &v,void *p)=0;
-		virtual void query(std::function<void(query&) >,void* )=0;
-	};
-
 	// field class template for the actual members (see the RPOCO macro for usage)
 	template<typename F>
 	class field : public member {
-		ptrdiff_t m_offset;
+		std::ptrdiff_t m_offset;
 	public:
-		field(std::string name,ptrdiff_t off) : member(name) {
+		field(std::string name,std::ptrdiff_t off) : member(name) {
 			this->m_offset=off;
 		}
-		ptrdiff_t offset() {
+		std::ptrdiff_t offset() {
 			return m_offset;
 		}
 		virtual void visit(visitor &v,void *p) {
-			rpoco::visit<F>(v,*(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ));
+			rpoco::visit<F>(v,*(F*)( (uintptr_t)p+(std::ptrdiff_t)m_offset ));
 		}
 		virtual void query( std::function<void(rpoco::query&) > qt,void *p) {
-			//auto q=make_query( *(F*)( (uintptr_t)p+(ptrdiff_t)m_offset ) );
-			typedquery<F> q( (F*)( (uintptr_t)p+(ptrdiff_t)m_offset ) );
+			//auto q=make_query( *(F*)( (uintptr_t)p+(std::ptrdiff_t)m_offset ) );
+			typedquery<F> q( (F*)( (uintptr_t)p+(std::ptrdiff_t)m_offset ) );
 			qt(q);
 		}
-	};
-
-	// a generic member provider class
-	class member_provider {
-	public:
-		virtual int size()=0; // number of members
-		virtual bool has(std::string id)=0; // do we have the requested member?
-		virtual member*& operator[](int idx)=0; // get an indexed member (0-size() are valid indexes)
-		virtual member*& operator[](std::string id)=0; // get a named member
 	};
 
 	// type_info is a member_provider implementation for regular classes.
@@ -775,8 +794,8 @@ namespace rpoco {
 	template<typename T>
 	struct rpoco_type_info_expand_member {
 		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,T &m) {
-			ptrdiff_t off=(ptrdiff_t) (  ((uintptr_t)&m)-_ths );
-			ti->add(new rpoco::field< std::remove_reference<T>::type >(names[idx],off) );
+			std::ptrdiff_t off=(std::ptrdiff_t) (  ((uintptr_t)&m)-_ths );
+			ti->add(new rpoco::field<typename std::remove_reference<T>::type >(names[idx],off) );
 		}
 	};
 	
@@ -784,12 +803,12 @@ namespace rpoco {
 	struct rpoco_type_info_expand_member<taginfo<T>> {
 		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,taginfo<T> &m) {
 			std::string &name=names[idx];
-			ptrdiff_t off=(ptrdiff_t) (  m.ref() -_ths );
+			std::ptrdiff_t off=(std::ptrdiff_t) (  m.ref() -_ths );
 			//printf("%s at %x\n",name.data(),off);
 			//for(auto tag:m.tags) {
 			//	printf("%s has tag %s\n",name.data(),tag);
 			//}
-			ti->add(new rpoco::field< std::remove_reference<T>::type >(name,off) );
+			ti->add(new rpoco::field<typename std::remove_reference<T>::type >(name,off) );
 		}
 	};
 

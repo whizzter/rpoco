@@ -4,6 +4,7 @@
 #ifndef __INCLUDED_RPOCOJSON_HPP__
 #define __INCLUDED_RPOCOJSON_HPP__
 
+
 #pragma once
 
 #include <rpoco/rpoco.hpp>
@@ -19,8 +20,8 @@ namespace rpocojson {
 	// Optional support exists for the parser to skip over C/C++ style comments.
 	// By default UTF16 surrogate decoding is done so that the UTF8 strings
 	// has full codepoints instead of surrogate pairs.
-	template<typename X> bool parse(std::istream &in,X &x,bool allow_c_comments,bool utf16_to_utf8);
-	template<typename X> bool parse(std::string &str,X &x,bool allow_c_comments,bool utf16_to_utf8);
+//	template<typename X> bool parse(std::istream &in,X &x,bool allow_c_comments=false,bool utf16_to_utf8=true);
+//	template<typename X> bool parse(std::string &str,X &x,bool allow_c_comments=false,bool utf16_to_utf8=true);
 	// A function to convert an RPOCO compatible structure to a JSON string.
 	template<typename X> std::string to_json(X &x);
 	// a catch-all class to read in arbitrary data from JSON fields.
@@ -457,8 +458,9 @@ namespace rpocojson {
 		return parser.ok && EOF==in.peek();
 	}
 	// small utility to wrap strings into streams if needed for parsing.
-	template<typename X> bool parse(std::string &str,X &x,bool allow_c_comments = false,bool utf16_to_utf8 = true) {
-		return parse(std::istringstream(str),x,allow_c_comments,utf16_to_utf8);
+	template<typename X> bool parse(std::string &string,X &x,bool allow_c_comments = false,bool utf16_to_utf8 = true) {
+		std::istringstream stream(string);
+		return parse(stream,x,allow_c_comments,utf16_to_utf8);
 	}
 
 	// function to dump an arbitrary RPOCO oobject as a string containing a JSON object
