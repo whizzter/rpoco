@@ -96,6 +96,8 @@ namespace rpoco {
 	};
 	
 	struct query {
+		virtual ~query() = default;
+	
 		virtual visit_type kind()=0;
 
 		bool find(const char* name,std::function<void(query&)> qt){
@@ -378,7 +380,7 @@ namespace rpoco {
 	template<typename F>
 	struct pointertypedquery : query {
 		F* p;
-		std::unique_ptr<typedquery<F>> sq;
+		std::unique_ptr<query> sq;
 
 		virtual visit_type kind() {
 			if (p) {
