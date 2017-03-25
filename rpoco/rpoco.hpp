@@ -52,6 +52,7 @@
 		if(!ti.is_init()) { \
 			ti.init([this](rpoco::type_info *ti) { \
 				std::vector<std::string> names=rpoco::extract_macro_names(#__VA_ARGS__); \
+				using rpoco::tag::_; \
 				rpoco_type_info_expand(ti,(uintptr_t)this,names,0,__VA_ARGS__); \
 			} ); \
 		} \
@@ -788,9 +789,12 @@ namespace rpoco {
 		uintptr_t ref() { return m_ref; }
 	};
 
-	template<typename T,typename ...I>
-	taginfo<T> tag(T &m,I... info) {
-		return std::move( taginfo<T>(m,{info...}) );
+	// we have a special tag namespace with the _ function to make _ a simple symbol for the RPOCO macro
+	namespace tag {
+		template<typename T, typename ...I>
+		taginfo<T> _(T &m, I... info) {
+			return std::move(taginfo<T>(m, { info... }));
+		}
 	}
 
 	template<typename T>

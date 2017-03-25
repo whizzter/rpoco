@@ -53,10 +53,10 @@ template <typename T>
 struct roundtrip {
 	roundtrip(std::string in) {
 		T test;
-		if (!rpocojson::parse(in,test)) {
+		if (!rpoco::parse_json(in,test)) {
 			printf("Error parsing:%s\n",in.c_str());
 		}
-		std::string out=rpocojson::to_json(test);
+		std::string out=rpoco::to_json(test);
 		printf("In:<< %s >> Out:<< %s >>\n",in.c_str(),out.c_str());
 	}
 };
@@ -64,17 +64,17 @@ template <typename T>
 struct roundtrip<T*> {
 	roundtrip(std::string in) {
 		T* test=0;
-		if (!rpocojson::parse(in,test)) {
+		if (!rpoco::parse_json(in,test)) {
 			printf("Error parsing:%s\n",in.c_str());
 		}
-		std::string out=rpocojson::to_json(test);
+		std::string out=rpoco::to_json(test);
 		printf("In:<< %s >> Out:<< %s >>\n",in.c_str(),out.c_str());
 		if (test)
 			delete test;
 	}
 };
 
-using rpocojson::json_value;
+using rpoco::json_value;
 
 int main(int argc,char **argv) {
 

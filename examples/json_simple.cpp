@@ -19,10 +19,10 @@ int main(int argc,char **argv) {
 	std::string sampleText="{ \"hello\":\"world\"  ,  \"x\":123  }";
 
 	// parse in data
-	rpocojson::parse(sampleText,data);
+	rpoco::parse_json(sampleText,data);
 	
 	// now write the data from the object back to a new json string
-	std::string outputText=rpocojson::to_json(data);
+	std::string outputText=rpoco::to_json(data);
 
 	// and print it
 	printf("%s\n",outputText.c_str());

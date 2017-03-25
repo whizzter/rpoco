@@ -15,7 +15,7 @@ namespace rpoco {
 		
 		// parse parses mustache templates into a tree of fragments, that tree can
 		// later be rendered out to an expanded structure from RPOCO structures.
-		multifragment parse(std::string &src);
+		multifragment parse(const std::string &src);
 		
 		class rendercontext {
 			std::function<void(rpoco::query&)> makeaccessor(std::function<void(rpoco::query&)> q,std::string name) {
@@ -59,7 +59,7 @@ namespace rpoco {
 		
 		// fragment is the basic type of nodes from the mustache template
 		class fragment {
-			friend multifragment parse(std::string &src);
+			friend multifragment parse(const std::string &src);
 		protected:
 			// all fragment nodes has a parent pointer (mostly used during parsing)
 			fragment *parent;
@@ -91,7 +91,7 @@ namespace rpoco {
 		
 		// Multifragment is a container that contains multiple subfragments
 		class multifragment : public fragment {
-			friend multifragment parse(std::string &src);
+			friend multifragment parse(const std::string &src);
 			std::vector<std::shared_ptr<fragment>> sub;
 		public:
 			multifragment()=default;
@@ -110,7 +110,7 @@ namespace rpoco {
 		
 		// valuefragments refers to fragments that retrieves data from a structure
 		class valuefragment : public fragment {
-			friend multifragment parse(std::string &src);
+			friend multifragment parse(const std::string &src);
 			std::string valuename;
 			bool escape;
 		public:
@@ -169,7 +169,7 @@ namespace rpoco {
 		// fragments used to output data from vectors or inverted fragments that
 		// hides data on truthyness.
 		class ctlfragment : public fragment {
-			friend multifragment parse(std::string &src);
+			friend multifragment parse(const std::string &src);
 			std::string ctlname;
 			bool invert;
 			multifragment sub;
@@ -221,7 +221,7 @@ namespace rpoco {
 
 		// partialfragments are fragments that refere to external file fragments
 		class partialfragment : public fragment {
-			friend multifragment parse(std::string &src);
+			friend multifragment parse(const std::string &src);
 			std::string name;
 		public:
 			virtual ~partialfragment()=default;
@@ -239,7 +239,7 @@ namespace rpoco {
 
 		// textfragments are plain old boring fragments of plain text.
 		class textfragment : public fragment {
-			friend multifragment parse(std::string &src);
+			friend multifragment parse(const std::string &src);
 			std::string data;
 		public:
 			virtual ~textfragment()=default;
@@ -249,7 +249,7 @@ namespace rpoco {
 		};
 		
 		// the parsing function that turns templates into a fragment tree.
-		multifragment parse(std::string &src) {
+		multifragment parse(const std::string &src) {
 			multifragment parsed;
 			std::string beginTag="{{";
 			std::string endTag="}}";

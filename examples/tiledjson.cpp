@@ -69,7 +69,7 @@ int main(int argc,char **argv) {
 		return -1;
 	}
 	std::ifstream is(argv[1]);
-	if (rpocojson::parse(is,tfile)) {
+	if (rpoco::parse_json(is,tfile)) {
 		// insert code here to do something useful with the tiledata :)
 		std::cout<<"the file "<<argv[1]<<" was correctly parsed\n";
 		return 0;
