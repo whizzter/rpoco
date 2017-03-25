@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <rpoco/rpocojson.hpp>
+#include <rpoco/json.hpp>
 
 struct Ser1 {
 	int x=0;

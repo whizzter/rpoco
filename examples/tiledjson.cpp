@@ -6,7 +6,7 @@
 //         viewing the Map->Map properties.. menu.
 
 #include <fstream>
-#include <rpoco/rpocojson.hpp>
+#include <rpoco/json.hpp>
 
 // Only handles square objects for the time being
 // Notice: x/y/width/height are specified in pixels and not tiles!

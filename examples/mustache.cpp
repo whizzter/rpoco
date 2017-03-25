@@ -1,6 +1,6 @@
 // Mustache template rendering sample
 
-#include <rpoco/rpocojson.hpp>
+#include <rpoco/json.hpp>
 #include <rpoco/mustache.hpp>
 
 struct Person {

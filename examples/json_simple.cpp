@@ -1,6 +1,6 @@
 // First very simple example of parsing and writing JSON data
 
-#include <rpoco/rpocojson.hpp>
+#include <rpoco/json.hpp>
 
 
 struct Simple {
