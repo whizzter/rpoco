@@ -53,7 +53,7 @@
 			ti.init([this](rpoco::type_info *ti) { \
 				std::vector<std::string> names=rpoco::extract_macro_names(#__VA_ARGS__); \
 				using rpoco::tag::_; \
-				rpoco_type_info_expand(ti,(uintptr_t)this,names,0,__VA_ARGS__); \
+				rpoco::rpoco_type_info_expand(ti,(uintptr_t)this,names,0,__VA_ARGS__); \
 			} ); \
 		} \
 		return &ti; \
@@ -774,11 +774,12 @@ namespace rpoco {
 		}
 	};
 
-	template<typename T>
+	template<typename T,typename ...ATTRS>
 	struct taginfo {
 		uintptr_t m_ref;
-		std::vector<const char*> tags;
-		taginfo(T &m,std::initializer_list<const char*> infoinit) : m_ref( (uintptr_t)&m ),tags(infoinit) {
+		//std::vector<const char*> tags;
+		std::tuple<ATTRS...> attrs;
+		taginfo(T &m,std::tuple<ATTRS...> inAttrs) : m_ref( (uintptr_t)&m ),attrs(inAttrs) {
 		//	m_ref=(uintptr_t)&m;
 		//	printf("Target:%p me:%p\n",&m,this);
 			//std::initializer_list<const char*> l={info...};
@@ -792,24 +793,25 @@ namespace rpoco {
 	// we have a special tag namespace with the _ function to make _ a simple symbol for the RPOCO macro
 	namespace tag {
 		template<typename T, typename ...I>
-		taginfo<T> _(T &m, I... info) {
-			return std::move(taginfo<T>(m, { info... }));
+		taginfo<T,I...> _(T &m, I... info) {
+			taginfo<T, I...> tmp(m, std::make_tuple<I...>(std::move(info)...));
+			return tmp;
 		}
 	}
 
 	template<typename T>
 	struct rpoco_type_info_expand_member {
-		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,T &m) {
+		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,const T &m) {
 			std::ptrdiff_t off=(std::ptrdiff_t) (  ((uintptr_t)&m)-_ths );
-			ti->add(new rpoco::field<typename std::remove_reference<T>::type >(names[idx],off) );
+			ti->add(new rpoco::field<typename std::remove_reference<typename std::remove_const<T>::type>::type >(names[idx],off) );
 		}
 	};
 	
-	template<typename T>
-	struct rpoco_type_info_expand_member<taginfo<T>> {
-		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,taginfo<T> &m) {
+	template<typename T,typename ...ATTRS>
+	struct rpoco_type_info_expand_member<taginfo<T,ATTRS...>> {
+		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,const taginfo<T,ATTRS...> &m) {
 			std::string &name=names[idx];
-			std::ptrdiff_t off=(std::ptrdiff_t) (  m.ref() -_ths );
+			std::ptrdiff_t off=(std::ptrdiff_t) (  ((taginfo<T,ATTRS...>)m).ref() -_ths );
 			//printf("%s at %x\n",name.data(),off);
 			//for(auto tag:m.tags) {
 			//	printf("%s has tag %s\n",name.data(),tag);
@@ -820,7 +822,7 @@ namespace rpoco {
 
 	void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx) {}
 	template<typename H,typename... R>
-	void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx,H& head,R&... rest) {
+	void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx,const H& head,const R&... rest) {
 		rpoco_type_info_expand_member<H>(ti,_ths,names,idx,head);
 		rpoco_type_info_expand(ti,_ths,names,idx+1,rest...);
 	}
@@ -843,19 +845,39 @@ namespace rpoco {
 				while(*t&& std::isspace(*t)) { t++; }
 				s=t;
 				// now size the name itself
-				while(*t&&!(std::isspace(*t)||*t==',')) { t++; }
+				while(*t&&!(std::isspace(*t)||*t==','||*t==')')) { t++; }
 				// and record it
 				out.push_back(std::string(s,t-s));
-				// now we will skip all extra info
-				bool inArg=false;
-				while(*t) {
-					if (!inArg && *t==')')
-						break;
-					if (*t=='\"')
-						inArg=!inArg;
+				if (*t != ')') {
+					// now we will skip all extra info associated with this var
+					bool inStr = false;
+					int prevChar = 0;
+					int parenCount = 1; // loop while we have a paren count (we can have args in args)
+					while (*t) {
+						int c = *t++;
+						if (inStr) {
+							if (c == '\"' && prevChar != '\\') {
+								inStr = false; // if prevchar differs from \ then we've ended the str.
+							} else if (c == '\\' && prevChar == '\\') {
+								prevChar = 0; // double slashes followed by a " must term so clear prevchar in that case.
+								continue;
+							}
+							prevChar = c;
+						} else {
+							if (c == ')') {
+								if (!(--parenCount))
+									break;
+							} else if (c == '(') {
+								parenCount++;
+							} else if (c == '\"') {
+								inStr = true;
+							}
+							prevChar = c;
+						}
+					}
+				} else {
 					t++;
 				}
-				t++;
 				// skip trailing spaces and commas
 				while(*t&&(std::isspace(*t)||*t==',')) { t++; }
 				s=t;

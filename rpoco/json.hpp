@@ -30,6 +30,16 @@ namespace rpoco {
 		// a catch-all class to read in arbitrary data from JSON fields.
 		class value;
 
+		class alias {
+			std::string aliasname;
+		public:
+			alias(const std::string & inv) :aliasname(inv) {}
+//			alias(const alias & other) = default;
+//			alias(const alias && other) : aliasname(std::move(other.aliasname)) {
+//			}
+			std::string name() { return aliasname; }
+		};
+
 		// create a UTF8 sequence from a unicode codepoint
 		// X is the type of our output
 		template<typename X> void dump_utf8(X &x, uint32_t c) {
@@ -873,7 +883,7 @@ namespace rpoco {
 		};
 	} // end of namespace rpoco::json
 
-	using json_value = typename rpoco::json::value;
+	using json_value = rpoco::json::value;
 
 	// create a specialization visitor for rpocojson::value to enable
 	// it to work coherently with the rest of the rpoco types.
