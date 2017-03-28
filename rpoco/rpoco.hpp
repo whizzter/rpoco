@@ -31,6 +31,8 @@
 #include <mutex>
 #include <cctype>
 #include <stdint.h>
+#include <typeinfo>
+#include <typeindex>
 #include <type_traits>
 #include <functional>
 #include <memory>
@@ -155,17 +157,32 @@ namespace rpoco {
 
 	// a generic member provider class
 	class member_provider {
+	protected:
+		std::unordered_map<std::type_index, void*> m_attributes;
 	public:
 		virtual int size()=0; // number of members
 		virtual bool has(std::string id)=0; // do we have the requested member?
 		virtual member*& operator[](int idx)=0; // get an indexed member (0-size() are valid indexes)
 		virtual member*& operator[](std::string id)=0; // get a named member
+
+		template<typename T>
+		T* attribute() {
+			auto it = m_attributes.find(std::type_index(typeid(T)));
+			if (it == m_attributes.end())
+				return null;
+			return it->second;
+		}
+		template<typename T>
+		void set_attribute(T v) {
+			m_attributes[std::type_index(typeid(T))] = new T(v);
+		}
 	};
 	// base class for class members, gives a name and provides an abstract visitation function
 	class member {
 	public:
 	protected:
 		std::string m_name;
+		std::unordered_map<std::type_index, void*> m_attributes;
 	public:
 		member(std::string name) {
 			this->m_name=name;
@@ -175,6 +192,13 @@ namespace rpoco {
 		}
 		virtual void visit(visitor &v,void *p)=0;
 		virtual void query(std::function<void(query&) >,void* )=0;
+		template <typename T>
+		T* attribute() {
+			auto it = m_attributes.find(std::type_index(typeid(T)));
+			if (it == m_attributes.end())
+				return null;
+			return it->second;
+		}
 	};
 
 
@@ -737,6 +761,10 @@ namespace rpoco {
 			typedquery<F> q( (F*)( (uintptr_t)p+(std::ptrdiff_t)m_offset ) );
 			qt(q);
 		}
+		template<typename T>
+		void set_attribute(T v) {
+			m_attributes[std::type_index(typeid(T))] = new T(v);
+		}
 	};
 
 	// type_info is a member_provider implementation for regular classes.
@@ -809,6 +837,15 @@ namespace rpoco {
 	
 	template<typename T,typename ...ATTRS>
 	struct rpoco_type_info_expand_member<taginfo<T,ATTRS...>> {
+		template<int I, typename TAI>
+		void set_attrib(rpoco::field<typename std::remove_reference<T>::type > *fld, TAI &ti) {
+		}
+		template<int I, typename TAI, typename H, typename ...REST>
+		void set_attrib(rpoco::field<typename std::remove_reference<T>::type > *fld, TAI &ti) {
+			fld->set_attribute<H>(std::get<I>(ti.attrs));
+			set_attrib<I + 1, TAI, REST...>(fld, ti);
+		}
+
 		rpoco_type_info_expand_member(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>&names,int idx,const taginfo<T,ATTRS...> &m) {
 			std::string &name=names[idx];
 			std::ptrdiff_t off=(std::ptrdiff_t) (  ((taginfo<T,ATTRS...>)m).ref() -_ths );
@@ -816,7 +853,9 @@ namespace rpoco {
 			//for(auto tag:m.tags) {
 			//	printf("%s has tag %s\n",name.data(),tag);
 			//}
-			ti->add(new rpoco::field<typename std::remove_reference<T>::type >(name,off) );
+			rpoco::field<typename std::remove_reference<T>::type > *fld = new rpoco::field<typename std::remove_reference<T>::type >(name, off);
+			ti->add(fld);
+			set_attrib<0, const taginfo<T, ATTRS...>, ATTRS...>(fld, m);
 		}
 	};
 
