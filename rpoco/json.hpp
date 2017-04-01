@@ -466,8 +466,9 @@ namespace rpoco {
 			};
 			// init parser object and then use it to visit the target
 			json_parser parser(in, allow_c_comments, utf16_to_utf8);
+			parser.skip(); // pre-skip any spaces,etc at the start of the text
 			rpoco::visit<X>(parser, x);
-			parser.skip();
+			parser.skip(); // post skip to get to the end of the file so we can report a completed parse
 			return parser.ok && EOF == in.peek();
 		}
 		// small utility to wrap strings into streams if needed for parsing.
