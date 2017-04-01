@@ -111,7 +111,7 @@ int main(int argc,char **argv) {
 
 	roundtrip<SerStrs>("{}");
 	roundtrip<SerStrs>("{\"a\":\"hello\", \"b\":\"world\"}");
-	roundtrip<SerStrs>("{\"a\":\"hello\", \"b\":\"toobig\"}");
+	roundtrip<SerStrs>("{\"a\":\"hello\", \"b\":\"toobig-shouldfail\"}");
 
 	return 0;
 }
