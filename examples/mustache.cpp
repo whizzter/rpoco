@@ -1,6 +1,6 @@
 // Mustache template rendering sample
 
-#include <rpoco/rpocojson.hpp>
+#include <rpoco/json.hpp>
 #include <rpoco/mustache.hpp>
 
 struct Person {
@@ -31,7 +31,7 @@ int main(int argc,char **argv) {
 	std::string sampleText="{ \"name\":\"Acme Store\",\"sales\":[5,100,30] ,\"boss\":{\"name\":\"Jane Doe\"}, \"emp\":[{\"name\":\"John Doe\",\"age\":12,\"child\":true,\"loyalty\":0.9},{\"name\":\"Bobby <>&\\\"' Tables\",\"age\":34,\"child\":false,\"loyalty\":0.01}] }";
 
 	// parse in data
-	rpocojson::parse(sampleText,data);
+	rpoco::parse_json(sampleText,data);
 
 	// main template
 	std::string mtpl="Store:{{name}}\n{{#sales}}Salecount:{{.}} {{/sales}}\nBossname:{{boss.name}}\n{{#emp}}{{> usertpl}}\n{{/emp}}";
