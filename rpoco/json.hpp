@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include <unordered_set>
+
+
 namespace rpoco {
 	// Functions to parse the istream or string into the templatized target
 	// these functions will return true if the parsing was successful.
@@ -27,18 +30,481 @@ namespace rpoco {
 	template<typename X> std::string to_json(X &x);
 
 	namespace json {
+		// A generic catch-all class that can have any kind of JSON data.
+		// Useful for parsing arbitrary JSON data but also used for
+		// "extra" fields in RPOCO data.
+		class value {
+			rpoco::visit_type m_type;
+			union {
+				bool b;
+				double n;
+				std::string *s;
+				std::vector<value> *a;
+				std::map<std::string, value> *o;
+			}data;
+			void copy_from(const value &other) {
+				set_type(other.m_type);
+				switch (other.m_type) {
+				case rpoco::vt_array:
+					*data.a = *other.data.a;
+					break;
+				case rpoco::vt_object:
+					*data.o = *other.data.o;
+					break;
+				case rpoco::vt_string:
+					*data.s = *other.data.s;
+					break;
+				case rpoco::vt_bool:
+					data.b = other.data.b;
+					break;
+				case rpoco::vt_number:
+					data.n = other.data.n;
+					break;
+				}
+			}
+		public:
+			value() {
+				m_type = rpoco::vt_null;
+			}
+			value(double v) {
+				m_type = rpoco::vt_number;
+				data.n = v;
+			}
+			value(const value &other) {
+				m_type = rpoco::vt_null;
+				copy_from(other);
+			}
+			value& operator=(const value &other) {
+				copy_from(other);
+				return *this;
+			}
+			void set_null() {
+				set_type(rpoco::vt_null);
+			}
+			value& operator=(double d) {
+				set_type(rpoco::vt_number);
+				data.n = d;
+				return *this;
+			}
+			value& operator=(bool b) {
+				set_type(rpoco::vt_bool);
+				data.b = b;
+				return *this;
+			}
+			value& operator=(std::string s) {
+				set_type(rpoco::vt_string);
+				*data.s = s;
+				return *this;
+			}
+			rpoco::visit_type type() {
+				return m_type;
+			}
+			bool to_bool() {
+				if (m_type == rpoco::vt_bool) {
+					return data.b;
+				} else {
+					return false;
+				}
+			}
+			double to_number() {
+				if (m_type == rpoco::vt_number) {
+					return data.n;
+				} else {
+					return 0;
+				}
+			}
+			std::string to_string() {
+				if (m_type == rpoco::vt_string) {
+					return *data.s;
+				} else {
+					return std::string("");
+				}
+			}
+			std::map<std::string, rpoco::json::value>* map() {
+				if (m_type != rpoco::vt_object)
+					return 0;
+				return data.o;
+			}
+			std::vector<rpoco::json::value>* array() {
+				if (m_type != rpoco::vt_array)
+					return 0;
+				return data.a;
+			}
+			void set_type(rpoco::visit_type toType) {
+				if (m_type != toType) {
+					switch (m_type) {
+					case rpoco::vt_string:
+						delete data.s;
+						break;
+					case rpoco::vt_array:
+						delete data.a;
+						break;
+					case rpoco::vt_object:
+						delete data.o;
+						break;
+					}
+					switch (toType) {
+					case rpoco::vt_array:
+						data.a = new std::vector<value>();
+						break;
+					case rpoco::vt_object:
+						data.o = new std::map<std::string, value>();
+						break;
+					case rpoco::vt_string:
+						data.s = new std::string();
+						break;
+					case rpoco::vt_number:
+						data.n = 0;
+						break;
+					case rpoco::vt_bool:
+						data.b = false;
+						break;
+					}
+				}
+				m_type = toType;
+			}
+			~value() {
+				set_type(rpoco::vt_null);
+			}
+		};
+
+	} // end of namespace rpoco::json for the value declaration
+
+
+	// shorthand type in the rpoco namespace
+	using json_value = rpoco::json::value;
+
+	// typedquery class for the json::value type
+	template<> struct typedquery<rpoco::json::value> : query {
+		rpoco::json::value *v;
+
+		typedquery(rpoco::json::value *v) {
+			this->v = v;
+		}
+		virtual visit_type kind() {
+			return v->type();
+		}
+
+		virtual int size() {
+			if (auto arr = v->array()) {
+				return arr->size();
+			}
+			return 0;
+		}
+
+		virtual void all(std::function<void(const std::string&, query&)> out) {
+			if (auto map = v->map()) {
+				for (auto pair : *map) {
+					auto mq = make_query(pair.second);
+					out(pair.first, mq);
+				}
+			}
+		}
+		virtual bool find(const std::string & name, std::function<void(query&)> out) {
+			if (auto map = v->map()) {
+				auto it = map->find(name);
+				if (it == map->end())
+					return false;
+				auto mq = make_query(it->second);
+				out(mq);
+			}
+			return false;
+		}
+		virtual void add(std::string & name, std::function<void(query&)>) {}
+
+		virtual void all(std::function<void(int, query&)> out) {
+			if (auto arr = v->array()) {
+				for (size_t i = 0;i<arr->size();i++) {
+					auto mq = make_query((*arr)[i]);
+					out(i, mq);
+				}
+			}
+		}
+		virtual bool at(int idx, std::function<void(query&)> out) {
+			if (auto arr = v->array()) {
+				auto mq = make_query((*arr)[idx]);
+				out(mq);
+			}
+			return false;
+		}
+		virtual void add(std::function<void(query&)>) {}
+
+		virtual operator bool*() {
+			return nullptr;
+		}
+		virtual operator int*() {
+			return nullptr;
+		}
+		virtual operator double*() {
+			return nullptr;
+		}
+		virtual void set(const char *) {}
+		virtual void set(std::string &k) {}
+		virtual std::string get() { return ""; }
+	};
+
+	// create a specialization visitor for rpocojson::value to enable
+	// it to work coherently with the rest of the rpoco types.
+	template<> struct visit<rpoco::json::value> {
+		visit(visitor &v, rpoco::json::value &jv) {
+			if (v.peek() == vt_none) {
+				switch (jv.type()) {
+				case vt_null: {
+					v.visit_null();
+				} break;
+				case vt_number: {
+					double d = jv.to_number();
+					v.visit(d);
+				} break;
+				case vt_bool: {
+					bool b = jv.to_bool();
+					v.visit(b);
+				} break;
+				case vt_string: {
+					std::string str = jv.to_string();
+					v.visit(str);
+				} break;
+				case vt_object:
+					visit<std::map<std::string, rpoco::json::value>>(v, *jv.map());
+					//v.produce_start(rpoco::vt_object);
+					//jv.object_items([&v](std::string &n,rpocojson::json::value &sv){
+					//	v.visit(n);
+					//	visit(v,sv);
+					//});
+					//v.produce_end(rpoco::vt_array);
+					break;
+				case vt_array: {
+					visit<std::vector<rpoco::json::value>>(v, *jv.array());
+					//std::string tmp("");
+					//v.produce_start(rpoco::vt_object);
+					//jv.array_items([&v,&tmp](int idx,rpocojson::json::value &sv){
+					//	v.visit(tmp);
+					//	visit(v,sv);
+					//});
+					//v.produce_end(rpoco::vt_array);
+				} break;
+				default:
+					abort();
+				}
+				return;
+			} else {
+				switch (v.peek()) {
+				case vt_null: {
+					v.visit_null();
+					jv.set_null();
+				} break;
+				case vt_number: {
+					double d;
+					v.visit(d);
+					jv = d;
+				} break;
+				case vt_bool: {
+					bool b;
+					v.visit(b);
+					jv = b;
+				} break;
+				case vt_string: {
+					std::string s;
+					v.visit(s);
+					jv = s;
+				} break;
+				case vt_object: {
+					jv.set_type(rpoco::vt_object);
+					rpoco::visit<std::map<std::string, rpoco::json::value>>(v, *jv.map());
+				} break;
+				case vt_array: {
+					jv.set_type(rpoco::vt_array);
+					rpoco::visit<std::vector<rpoco::json::value>>(v, *jv.array());
+				} break;
+				}
+			}
+		}
+	};
+
+
+	namespace json {
 		// a catch-all class to read in arbitrary data from JSON fields.
 		class value;
 
+		// JSON specialized typeinfo, enabled by the alias, ignore and extra attributes.
+		class json_typeinfo;
+
+		// Marker class used with RPOCO annotations to signify that the selected field will receive extra JSON data not recognized by the basic type
+		class extra {
+			friend class json_typeinfo;
+
+			// friend rpoco::field so that this class can register the need for json_typeinfo
+			template<typename T>
+			friend class rpoco::field;
+
+			// the existence of this function forces all the types in this functions arguments to exist as attributes inside the type_info for the type
+			void rpoco_link_type_info_attributes(json_typeinfo & ti) {}
+
+			std::function<void(visitor &v,void *owner, const std::string &key)> consume_extra;
+			std::function<void(visitor &v, void *obj)> produce_extra;
+
+			// this function only exists to signal that this class wants to initialize the field type
+			void rpoco_want_link_field_type() {}
+			// the field type is registered with this instance.
+			template<typename T>
+			void rpoco_link_field_type(rpoco::field<T> * arg) {
+				consume_extra = [arg](visitor &v,void *owner,const std::string &key) {
+					T* mappy = (T*)((std::ptrdiff_t)owner + (std::ptrdiff_t)arg->offset());
+					rpoco::visit<decltype(mappy->end()->second)>(v, (*mappy)[key]);
+				};
+				produce_extra = [arg](visitor &v, void *obj) {
+					T* mappy = (T*)((std::ptrdiff_t)obj + (std::ptrdiff_t)arg->offset());
+					for (auto pair : *mappy) {
+						v.visit(const_cast<std::string&>(pair.first));
+						rpoco::visit<decltype(pair.second)>(v, pair.second);
+					}
+				};
+			}
+		};
+
+		// Marker class to ensure that the data in fields marked with this isn't serialized. Useful for passwords for example.
+		class ignore {
+			// friend rpoco::field so that this class can register the need for json_typeinfo
+			template<typename T>
+			friend class rpoco::field;
+			void rpoco_link_type_info_attributes(json_typeinfo & ti) {}
+		};
+
+		// Aliases, controls the naming of fields marked with this.
 		class alias {
+			// friend json_typeinfo so that the aliasing function can access the aliasname data
+			friend class json_typeinfo;
 			std::string aliasname;
+
+			// friend rpoco::field so that this class can register the need for json_typeinfo
+			template<typename T>
+			friend class rpoco::field;
+			void rpoco_link_type_info_attributes(json_typeinfo & ti) {}
 		public:
 			alias(const std::string & inv) :aliasname(inv) {}
-//			alias(const alias & other) = default;
-//			alias(const alias && other) : aliasname(std::move(other.aliasname)) {
-//			}
-			std::string name() { return aliasname; }
 		};
+
+		// generic json_typeinfo (when parsing/generating rpoco types that have aliases , ignores and/or extra catchalls)
+		class json_typeinfo {
+			std::unordered_map<std::string, rpoco::member*> mappings;
+			rpoco::json::extra *extra;
+
+			// friend the type_info type so that they can invoke our post-init function.
+			friend rpoco::type_info;
+			void rpoco_post_init(rpoco::type_info &ti) {
+				// rebuild mapping list
+				mappings.clear();
+				extra = nullptr;
+				for (int i = 0;i < ti.size();i++) {
+					auto memb = ti[i];
+					if (auto * ign = memb->attribute<ignore>()) {
+						continue; // ignored member, no JSON serialization here
+					}
+					if (auto * exatt= memb->attribute<rpoco::json::extra>()) {
+						extra = exatt;
+						continue;
+					}
+					if (auto * aliasatt = memb->attribute<alias>()) {
+						mappings[aliasatt->aliasname] = memb;
+					} else {
+						mappings[memb->name()] = memb;
+					}
+				}
+			}
+		public:
+			void produce_object(visitor &v, void *obj) {
+				v.produce_start(vt_object);
+				for (auto mapping : mappings) {
+					v.visit( const_cast<std::string&>(mapping.first));
+					mapping.second->visit(v, obj);
+				}
+				if (this->extra) {
+					this->extra->produce_extra(v,obj);
+				}
+				v.produce_end(vt_object);
+			}
+			std::function<void(const std::string &)> make_map_consumer(visitor *v,void *obj,rpoco::member **mpp) {
+				return [this, v, obj,mpp](const std::string & key) {
+					rpoco::member *old = *mpp;
+					auto it = mappings.find(key);
+					if (it != mappings.end()) {
+						*mpp = it->second;
+						it->second->visit(*v, obj);
+						*mpp = old;
+						return;
+					}
+					if (this->extra) {
+						this->extra->consume_extra(*v, obj, key);
+						return;
+					}
+					niltarget nt;
+					rpoco::visit<niltarget>(*v, nt);
+				};
+			}
+		};
+
+
+		// Select_info's holds the functionality to build specialized objects depending on the JSON data contents.
+		class select_info {
+			std::string keyname;
+			std::unordered_map<std::string, std::function<void*()>> selections;
+			template<typename ...T> friend  select_info select(const char * selector);
+
+			template<typename T>
+			void expand_selections(const char *selector) {
+			}
+			template<typename T, typename H, typename ...R>
+			void expand_selections(const char *selector) {
+				H tmp_inst;
+				rpoco::member_provider *mb = tmp_inst.rpoco_type_info_get();
+				if (!mb->has(selector)) {
+					throw std::runtime_error(std::string("type lacks a ") + selector + " field");
+				}
+				rpoco::member *mr = (*mb)[selector];
+				const char ** pselval = mr->access<const char*>(&tmp_inst);
+				if (!pselval) {
+					throw std::runtime_error(std::string("selector ") + selector + " is not a string");
+				}
+				selections[*pselval] = []() { return new H(); };
+				expand_selections<T, R...>(selector);
+			}
+
+			template<typename ...T>
+			select_info(const char *selector, std::tuple<T...>* dummy) {
+				keyname = selector;
+				expand_selections<std::tuple<T...>, T...>(selector);
+			}
+		public:
+			void* construct(value &v) {
+				// Do we have an object read in?
+				if (v.type() != vt_object)
+					return nullptr;
+				// get the objects internal mapping
+				auto mapping = v.map();
+				// try to find the selector key
+				auto kv = mapping->find(keyname);
+				// if the selector key is not found then we can't build
+				if (kv == mapping->end())
+					return nullptr;
+				// is it a string selector?
+				if (kv->second.type() == vt_string) {
+					// if it's a string selector try to find a mapping to an actual type
+					auto si = selections.find(kv->second.to_string());
+					if (si == selections.end())
+						return nullptr;
+					// a proper mapping found, make the object
+					return si->second();
+				} else {
+					return nullptr;
+				}
+			}
+		};
+
+		// select template annotation used to produce select_info data
+		template<typename ...T>
+		select_info select(const char * selector) {
+			return select_info(selector, (std::tuple<T...>*)nullptr);
+		}
 
 		// create a UTF8 sequence from a unicode codepoint
 		// X is the type of our output
@@ -116,6 +582,8 @@ namespace rpoco {
 				bool allow_c_comments;
 				// decode utf16 surrogates
 				bool utf16_to_utf8;
+				// current member we're working with.
+				rpoco::member * current_member = 0;
 
 				// constructor to take the options and input for the parser.
 				json_parser(std::istream &ins, bool allow_c_comments = false, bool utf16_to_utf8 = true) {
@@ -123,6 +591,11 @@ namespace rpoco {
 					this->allow_c_comments = allow_c_comments;
 					this->utf16_to_utf8 = utf16_to_utf8;
 				}
+				virtual void error(const std::string &err) {
+					ok = false;
+					abort();
+				}
+
 				// skip non-spaces (and comments if that is enabled)
 				void skip() {
 					while (ok) {
@@ -220,61 +693,91 @@ namespace rpoco {
 					skip();
 					match("null");
 				}
-				// object and array parsing function ("consumption")
-				// the visit type is checked and then the 
-				virtual bool consume(rpoco::visit_type vt, std::function<void(std::string&)> g) {
+				virtual void* construct(std::type_index index) {
+					if (!current_member)
+						return nullptr;
+					select_info * info=current_member->attribute<rpoco::json::select_info>();
+					if (!info)
+						return nullptr;
+					auto pos = ins->tellg();
+					json_value jv;
+					rpoco::visit<json_value>(*this, jv);
+					ins->seekg(pos);
+					return info->construct(jv);
+				}
+				// object,map and array parsing functions ("consumption")
+				virtual bool consume_object(member_provider &mp,void *obj) {
+					// check if we have a json_typeinfo mapping that overrides the regular object layout.
+					if (auto jti = mp.attribute<json_typeinfo>()) {
+						// if so, use that to consume the object
+						return consume_map(jti->make_map_consumer(this, obj,&current_member));
+					}
+					// otherwise create a plain C++ mapping default
+					return consume_map([&](const std::string &key) {
+						// invoke the consumer function with the key to parse the rest
+						if (mp.has(key)) {
+							auto member = mp[key];
+							auto old_member = current_member;
+							current_member = member;
+							member->visit(*this, obj);
+							current_member = old_member;
+						} else {
+							visit_nil(*this);
+						}
+					});
+				}
+				virtual bool consume_map(const std::function<void(const std::string&)> &g) {
+					// JSON object
+					ok &= ins->get() == '{';
+					if (!ok) return true;
 					skip();
-					if (vt == rpoco::vt_object) {
-						// JSON object
-						ok &= ins->get() == '{';
-						if (!ok) return true;
-						skip();
-						if (ins->peek() != '}')
-							while (ok) {
-								// first validate and get the property name string
-								skip();
-								ok &= ins->peek() == '"';
-								if (!ok) break; // stop if not a string property
-								// now reset the tmp string
-								tmp.clear();
-								// read in the property name
-								visit(tmp);
-								// ensure that we have a correct separator :
-								skip();
-								ok &= ins->get() == ':';
-								if (!ok) break; // stop if syntax error
-								skip();
-								// invoke the consumer function with the key to parse the rest
-								g(tmp);
-								tmp.clear();
-								skip();
-								if (ins->peek() == '}')
-									break; // end of object
-								ok &= ins->get() == ',';
-								skip();
-							}
-						if (ok)
-							ins->get(); // read '}'
-					} else if (vt == rpoco::vt_array) {
-						// JSON array
-						ok &= ins->get() == '[';
-						if (!ok) return true;
-						tmp.clear();
-						if (ins->peek() != ']')
-							while (ok) {
-								skip();
-								// just let the consumer read in the members
-								g(tmp);
-								skip();
-								// and detect the trailing ']' or check the separator comma
-								if (ins->peek() == ']')
-									break;
-								ok &= ins->get() == ',';
-								skip();
-							}
-						if (ok)
-							ins->get(); // get end ']'
-					} else abort(); // consume can only be called for objects and arrays
+					if (ins->peek() != '}')
+						while (ok) {
+							// first validate and get the property name string
+							skip();
+							ok &= ins->peek() == '"';
+							if (!ok) break; // stop if not a string property
+											// now reset the tmp string
+							tmp.clear();
+							// read in the property name
+							visit(tmp);
+							// ensure that we have a correct separator :
+							skip();
+							ok &= ins->get() == ':';
+							if (!ok) break; // stop if syntax error
+							skip();
+							// invoke the consumer function with the key to parse the rest
+							g(tmp);
+							tmp.clear();
+							skip();
+							if (ins->peek() == '}')
+								break; // end of object
+							ok &= ins->get() == ',';
+							skip();
+						}
+					if (ok)
+						ins->get(); // read '}'
+					return true;
+				}
+				virtual bool consume_array(const std::function<void()> &g) {
+					// JSON array
+					ok &= ins->get() == '[';
+					if (!ok) return true;
+					tmp.clear();
+					if (ins->peek() != ']')
+						while (ok) {
+							skip();
+							// just let the consumer read in the members
+							g();
+							skip();
+							// and detect the trailing ']' or check the separator comma
+							if (ins->peek() == ']')
+								break;
+							ok &= ins->get() == ',';
+							skip();
+						}
+					if (ok)
+						ins->get(); // get end ']'
 					return true;
 				}
 				// boolean parsing
@@ -538,6 +1041,13 @@ namespace rpoco {
 						break;
 					}
 				}
+				virtual void produce_object(member_provider &mp, void *obj) {
+					if (auto jti = mp.attribute<json_typeinfo>()) {
+						jti->produce_object(*this, obj);
+					} else {
+						rpoco::visitor::produce_object(mp, obj);
+					}
+				}
 				// called when entering a object or array
 				// responsible for updating the state stack
 				virtual void produce_start(rpoco::visit_type vt) {
@@ -561,8 +1071,13 @@ namespace rpoco {
 					}
 				}
 				// visitor interface to query production or consumption mode
-				virtual bool consume(rpoco::visit_type vt, std::function<void(std::string&)> g) {
-					// the generator does not consume anything, return false
+				virtual bool consume_object(member_provider &mp,void *p) {
+					return false;
+				}
+				virtual bool consume_map(const std::function<void(const std::string&)> &out) {
+					return false;
+				}
+				virtual bool consume_array(const std::function<void()> &out) {
 					return false;
 				}
 				// called to produce the object end
@@ -739,6 +1254,9 @@ namespace rpoco {
 					out.append("null");
 					post();
 				}
+				virtual void error(const std::string &err) {
+					abort();
+				}
 			};
 			json_writer writer;
 
@@ -746,221 +1264,8 @@ namespace rpoco {
 			return writer.out;
 		}
 
-		// a generic catch-all class that can have any kind of JSON data.
-		class value {
-			rpoco::visit_type m_type;
-			union {
-				bool b;
-				double n;
-				std::string *s;
-				std::vector<value> *a;
-				std::map<std::string, value> *o;
-			}data;
-			void copy_from(const value &other) {
-				set_type(other.m_type);
-				switch (other.m_type) {
-				case rpoco::vt_array:
-					*data.a = *other.data.a;
-					break;
-				case rpoco::vt_object:
-					*data.o = *other.data.o;
-					break;
-				case rpoco::vt_string:
-					*data.s = *other.data.s;
-					break;
-				case rpoco::vt_bool:
-					data.b = other.data.b;
-					break;
-				case rpoco::vt_number:
-					data.n = other.data.n;
-					break;
-				}
-			}
-		public:
-			value() {
-				m_type = rpoco::vt_null;
-			}
-			value(double v) {
-				m_type = rpoco::vt_number;
-				data.n = v;
-			}
-			value(const value &other) {
-				m_type = rpoco::vt_null;
-				copy_from(other);
-			}
-			value& operator=(const value &other) {
-				copy_from(other);
-				return *this;
-			}
-			void set_null() {
-				set_type(rpoco::vt_null);
-			}
-			value& operator=(double d) {
-				set_type(rpoco::vt_number);
-				data.n = d;
-				return *this;
-			}
-			value& operator=(bool b) {
-				set_type(rpoco::vt_bool);
-				data.b = b;
-				return *this;
-			}
-			value& operator=(std::string s) {
-				set_type(rpoco::vt_string);
-				*data.s = s;
-				return *this;
-			}
-			rpoco::visit_type type() {
-				return m_type;
-			}
-			bool to_bool() {
-				if (m_type == rpoco::vt_bool) {
-					return data.b;
-				} else {
-					return false;
-				}
-			}
-			double to_number() {
-				if (m_type == rpoco::vt_number) {
-					return data.n;
-				} else {
-					return 0;
-				}
-			}
-			std::string to_string() {
-				if (m_type == rpoco::vt_string) {
-					return *data.s;
-				} else {
-					return std::string("");
-				}
-			}
-			std::map<std::string, rpoco::json::value>* map() {
-				if (m_type != rpoco::vt_object)
-					return 0;
-				return data.o;
-			}
-			std::vector<rpoco::json::value>* array() {
-				if (m_type != rpoco::vt_array)
-					return 0;
-				return data.a;
-			}
-			void set_type(rpoco::visit_type toType) {
-				if (m_type != toType) {
-					switch (m_type) {
-					case rpoco::vt_string:
-						delete data.s;
-						break;
-					case rpoco::vt_array:
-						delete data.a;
-						break;
-					case rpoco::vt_object:
-						delete data.o;
-						break;
-					}
-					switch (toType) {
-					case rpoco::vt_array:
-						data.a = new std::vector<value>();
-						break;
-					case rpoco::vt_object:
-						data.o = new std::map<std::string, value>();
-						break;
-					case rpoco::vt_string:
-						data.s = new std::string();
-						break;
-					case rpoco::vt_number:
-						data.n = 0;
-						break;
-					case rpoco::vt_bool:
-						data.b = false;
-						break;
-					}
-				}
-				m_type = toType;
-			}
-			~value() {
-				set_type(rpoco::vt_null);
-			}
-		};
+
 	} // end of namespace rpoco::json
-
-	using json_value = rpoco::json::value;
-
-	// create a specialization visitor for rpocojson::value to enable
-	// it to work coherently with the rest of the rpoco types.
-	template<> struct visit<rpoco::json::value> { visit (visitor &v,rpoco::json::value &jv) {
-		if (v.peek()==vt_none) {
-			switch(jv.type()) {
-			case vt_null : {
-					v.visit_null();
-				} break;
-			case vt_number : {
-					double d=jv.to_number();
-					v.visit(d);
-				} break;
-			case vt_bool : {
-					bool b=jv.to_bool();
-					v.visit(b);
-				} break;
-			case vt_string : {
-					std::string str=jv.to_string();
-					v.visit(str);
-				} break;
-			case vt_object :
-				visit<std::map<std::string,rpoco::json::value>>(v,*jv.map());
-				//v.produce_start(rpoco::vt_object);
-				//jv.object_items([&v](std::string &n,rpocojson::json::value &sv){
-				//	v.visit(n);
-				//	visit(v,sv);
-				//});
-				//v.produce_end(rpoco::vt_array);
-				break;
-			case vt_array : {
-					visit<std::vector<rpoco::json::value>>(v,*jv.array());
-					//std::string tmp("");
-					//v.produce_start(rpoco::vt_object);
-					//jv.array_items([&v,&tmp](int idx,rpocojson::json::value &sv){
-					//	v.visit(tmp);
-					//	visit(v,sv);
-					//});
-					//v.produce_end(rpoco::vt_array);
-				} break;
-			default:
-				abort();
-			}
-			return;
-		} else {
-			switch(v.peek()) {
-			case vt_null : {
-					v.visit_null();
-					jv.set_null();
-				} break;
-			case vt_number : {
-					double d;
-					v.visit(d);
-					jv=d;
-				} break;
-			case vt_bool : {
-					bool b;
-					v.visit(b);
-					jv=b;
-				} break;
-			case vt_string : {
-					std::string s;
-					v.visit(s);
-					jv=s;
-				} break;
-			case vt_object : {
-					jv.set_type(rpoco::vt_object);
-					rpoco::visit<std::map<std::string,rpoco::json::value>>(v,*jv.map());
-				} break;
-			case vt_array : {
-					jv.set_type(rpoco::vt_array);
-					rpoco::visit<std::vector<rpoco::json::value>>(v,*jv.array());
-				} break;
-			}
-		}
-	}};
-
 
 	// actual declarations
 	template<typename X> bool parse_json(std::istream &in, X &x, bool allow_c_comments, bool utf16_to_utf8) {
