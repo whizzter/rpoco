@@ -40,7 +40,8 @@ int main(int argc,char **argv) {
 	auto usertplfrag=rpoco::mustache::parse(std::string("[escaped:{{name}} unescaped:{{{name}}} aged {{age}} is a {{#child}}child{{/child}}{{^child}}parent{{/child}} with loyalty {{loyalty}}]"));
 
 	// create a partial resolver to support the rendering function (this could be more advanced and support f.ex. file loading)
-	std::function<rpoco::mustache::multifragment*(std::string &name)> partialresolver=[&](std::string &partname){
+	rpoco::mustache::renderoptions renderopts;
+	renderopts.partial_finder=[&](std::string &partname){
 		if (partname=="usertpl")
 			return &usertplfrag;
 		else
@@ -48,7 +49,7 @@ int main(int argc,char **argv) {
 	};
 
 	// render template with object data
-	auto outputText=rpoco::mustache::parse(mtpl).render(data,partialresolver);
+	auto outputText=rpoco::mustache::parse(mtpl).render(data,renderopts);
 
 	// and print it
 	printf("%s",outputText.c_str());

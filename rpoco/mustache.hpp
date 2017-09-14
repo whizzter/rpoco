@@ -11,12 +11,22 @@
 namespace rpoco {
 	namespace mustache {
 
+		class rendercontext;
 		class multifragment;
 		
 		// parse parses mustache templates into a tree of fragments, that tree can
 		// later be rendered out to an expanded structure from RPOCO structures.
 		multifragment parse(const std::string &src);
-		
+
+		void htmlescaper(rendercontext &ctx, std::string &data);
+
+		struct renderoptions {
+			std::function<multifragment*(std::string &name)> partial_finder;
+			std::function<void(rendercontext &, std::string &)> escaper;
+
+			renderoptions() : escaper(htmlescaper), partial_finder() {}
+		};
+
 		class rendercontext {
 			std::function<void(rpoco::query&)> makeaccessor(std::function<void(rpoco::query&)> q,std::string name) {
 				return [this,q,name](rpoco::query& cur) {
@@ -31,9 +41,12 @@ namespace rpoco {
 			}
 		public:
 			std::vector<rpoco::query*> rstack;
-			std::function<void(char)> *out;
-			std::function<multifragment*(std::string &name)> pfinder;
-			
+			std::function<void(char)> &out;
+			renderoptions &options;
+
+			rendercontext(std::function<void(char)> &outfn,renderoptions &opts) : out(outfn), options(opts) {
+			}
+
 			bool resolve(std::string &name,std::function<void(rpoco::query&)> q) {
 				bool found=false;
 				if (name==".") {
@@ -52,11 +65,37 @@ namespace rpoco {
 			}
 			void dumpchars(const char *buf,int sz) {
 				for (int i=0;i<sz;i++) {
-					(*out)(buf[i]);
+					out(buf[i]);
 				}
 			}
 		};
-		
+
+		static void htmlescaper(rendercontext &ctx, std::string &strval)
+		{
+			for (int i = 0;i<strval.size();i++) {
+				switch (strval[i]) {
+				case '<':
+					ctx.dumpchars("&lt;", 4);
+					break;
+				case '>':
+					ctx.dumpchars("&gt;", 4);
+					break;
+				case '\"':
+					ctx.dumpchars("&quot;", 6);
+					break;
+				case '\'':
+					ctx.dumpchars("&#039;", 6);
+					break;
+				case '&':
+					ctx.dumpchars("&amp;", 5);
+					break;
+				default:
+					(ctx.out)(strval[i]);
+					break;
+				}
+			}
+		}
+
 		// fragment is the basic type of nodes from the mustache template
 		class fragment {
 			friend multifragment parse(const std::string &src);
@@ -72,19 +111,17 @@ namespace rpoco {
 			// recursively during template rendering, if custom output is wanted
 			// instead of a string like in the render helper then just implement the
 			// lambda function and push out characters somewhere else.
-			virtual void renderFragment(rendercontext *)=0;
+			virtual void renderFragment(rendercontext &)=0;
 			
 			// a render helper function that dumps all characters to a string that
 			// can then be used.
-			template <typename T> std::string render(T &data,std::function<multifragment*(std::string &name)> pres=std::function<multifragment*(std::string &name)>() ) {
+			template <typename T> std::string render(T &data, renderoptions opts = {}) {
 				std::string out;
 				auto query=rpoco::make_query(data);
-				rendercontext ctx;
+				std::function<void(char)> outfun = [&out](char c) { out.push_back(c); };
+				rendercontext ctx(outfun,opts);
 				ctx.rstack.push_back(&query);
-				std::function<void(char)> outfun=[&out](char c){ out.push_back(c); };
-				ctx.out=&outfun;
-				ctx.pfinder=pres;
-				this->renderFragment(&ctx);
+				this->renderFragment(ctx);
 				return out;
 			}
 		};
@@ -101,7 +138,7 @@ namespace rpoco {
 			multifragment& operator=(multifragment &&src)=default;
 			virtual ~multifragment()=default;
 
-			virtual void renderFragment(rendercontext *ctx){
+			virtual void renderFragment(rendercontext &ctx){
 				for (int i=0;i<sub.size();i++) {
 					sub[i]->renderFragment(ctx);
 				}
@@ -115,47 +152,26 @@ namespace rpoco {
 			bool escape;
 		public:
 			virtual ~valuefragment()=default;
-			virtual void renderFragment(rendercontext *ctx){
+			virtual void renderFragment(rendercontext &ctx){
 				//bool found=false;
 				//for (int i=q.size()-1;!found && i>=0;i--) {
 					//q[i]->find(valuename,
-				ctx->resolve(valuename,
+				ctx.resolve(valuename,
 					[this,&ctx](rpoco::query &vq){
 					//	found=true;
 						if (vq.kind()==rpoco::vt_string) {
 							std::string strval=vq.get();
 							if (!escape)
-								ctx->dumpchars(strval.data(),strval.size());
+								ctx.dumpchars(strval.data(), strval.size());
 							else
-								for (int i=0;i<strval.size();i++) {
-									switch(strval[i]) {
-									case '<' :
-										ctx->dumpchars("&lt;",4);
-										break;
-									case '>' :
-										ctx->dumpchars("&gt;",4);
-										break;
-									case '\"' :
-										ctx->dumpchars("&quot;",6);
-										break;
-									case '\'' :
-										ctx->dumpchars("&#039;",6);
-										break;
-									case '&' :
-										ctx->dumpchars("&amp;",5);
-										break;
-									default:
-										(*ctx->out)(strval[i]);
-										break;
-									}
-								}
+								ctx.options.escaper(ctx,strval);
 						} else if (vq.kind()==rpoco::vt_number) {
 							if (int *ip=vq) {
 								auto is=std::to_string(*ip);
-								ctx->dumpchars(is.c_str(),is.size());
+								ctx.dumpchars(is.c_str(),is.size());
 							} else if (double *dp=vq) {
 								auto ds=std::to_string(*dp);
-								ctx->dumpchars(ds.c_str(),ds.size());
+								ctx.dumpchars(ds.c_str(),ds.size());
 							}
 						} else {
 							printf("Vt kind:%d not handled\n",vq.kind());
@@ -175,21 +191,21 @@ namespace rpoco {
 			multifragment sub;
 		public:
 			virtual ~ctlfragment()=default;
-			virtual void renderFragment(rendercontext *ctx) {
+			virtual void renderFragment(rendercontext &ctx) {
 				//bool found=false;
 				//for(int i=q.size()-1;!found && i>=0;i--) {
 				
-				bool found=ctx->resolve(ctlname,[&](rpoco::query &vq){
+				bool found=ctx.resolve(ctlname,[&](rpoco::query &vq){
 						//found=true;
 						bool truthy=false;
 						if (vq.kind()==rpoco::vt_array) {
 							if (vq.size() && !invert) {
-								ctx->rstack.push_back(nullptr);
+								ctx.rstack.push_back(nullptr);
 								vq.all([&](int idx,rpoco::query &subq){
-									(ctx->rstack.back())=&subq;
+									(ctx.rstack.back())=&subq;
 									sub.renderFragment(ctx);
 								});
-								ctx->rstack.pop_back();
+								ctx.rstack.pop_back();
 								return;
 							}
 							truthy = vq.size()!=0;
@@ -225,12 +241,12 @@ namespace rpoco {
 			std::string name;
 		public:
 			virtual ~partialfragment()=default;
-			virtual void renderFragment(rendercontext *ctx) {
-				if (!ctx->pfinder) {
-					printf("no finder!\n");
+			virtual void renderFragment(rendercontext &ctx) {
+				if (!ctx.options.partial_finder) {
+					fprintf(stderr,"no partial finder in mustache.hpp!\n");
 					return;
 				}
-				multifragment *sub=ctx->pfinder(name);
+				multifragment *sub=ctx.options.partial_finder (name);
 				if (!sub)
 					return;
 				sub->renderFragment(ctx);
@@ -243,8 +259,8 @@ namespace rpoco {
 			std::string data;
 		public:
 			virtual ~textfragment()=default;
-			virtual void renderFragment(rendercontext *ctx){
-				ctx->dumpchars(data.data(),data.size());
+			virtual void renderFragment(rendercontext &ctx){
+				ctx.dumpchars(data.data(),data.size());
 			}
 		};
 		
@@ -272,7 +288,8 @@ namespace rpoco {
 						} else {
 							kind=0;
 						}
-						size_t end=src.find(kind=='{'?ueEndTag:endTag,i);
+						auto & cendtag = kind == '{' ? ueEndTag : endTag;
+						size_t end=src.find(cendtag,i);
 						if (std::string::npos==end) {
 							// Mark end somehow?!
 							printf("End tag not found!!\n");
@@ -323,7 +340,7 @@ namespace rpoco {
 									abort();
 								}
 							}
-							i=end+2;
+							i=end+cendtag.size();
 							continue;
 						}
 					} else {
