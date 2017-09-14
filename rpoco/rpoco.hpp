@@ -760,7 +760,7 @@ namespace rpoco {
 	struct visit<std::tuple<TUP...>> {
 		visit(visitor &v, std::tuple<TUP...> &tp) {
 			int i=0;
-			if (v.consume_array([&v, &tp,&i](std::string& x) {
+			if (v.consume_array([&v, &tp,&i]() {
 				consume<0, std::tuple<TUP...>,TUP...>(v,tp,i);
 				i++;
 			})) {
@@ -1097,7 +1097,7 @@ namespace rpoco {
 		}
 	};
 
-	void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx) {}
+	static void rpoco_type_info_expand(rpoco::type_info *ti,uintptr_t _ths,std::vector<std::string>& names,int idx) {}
 
 //	template<typename... R>
 //	void rpoco_type_info_expand(rpoco::type_info *ti, uintptr_t _ths, std::vector<std::string>& names, int idx, const char * data, const R&... rest) {
