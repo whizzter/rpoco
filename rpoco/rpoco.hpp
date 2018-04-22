@@ -187,7 +187,8 @@ namespace rpoco {
 		virtual void visit_null() = 0;
 		virtual void visit(bool& b)=0;
 		virtual void visit(int& x)=0;
-		virtual void visit(double& x)=0;
+		virtual void visit(float& x) = 0;
+		virtual void visit(double& x) = 0;
 		virtual void visit(std::string &k)=0;
 		virtual void visit(char *,size_t sz)=0;
 		virtual void error(const std::string &err)=0;
@@ -423,6 +424,17 @@ namespace rpoco {
 	};
 
 	template<>
+	struct typedquery<float> : emptyquery {
+		float *fp;
+		typedquery(float *qv) {
+			fp = qv;
+		}
+		virtual visit_type kind() { return vt_number; }
+		virtual operator float*() {
+			return fp;
+		}
+	};
+	template<>
 	struct typedquery<double> : emptyquery {
 		double *dp;
 		typedquery(double *dv) {
@@ -529,6 +541,7 @@ namespace rpoco {
 
 		virtual operator bool*() { return nullptr; }
 		virtual operator int*() { return nullptr; }
+		virtual operator float*() { return nullptr; }
 		virtual operator double*() { return nullptr; }
 		virtual void set(const char *) {}
 		virtual void set(std::string &k) {}
@@ -866,9 +879,16 @@ namespace rpoco {
 		}
 	};
 
+	// float visitation
+	template<> struct visit<float> {
+		visit(visitor &v, float &ip) {
+			v.visit(ip);
+		}
+	};
+
 	// double visitation
 	template<> struct visit<double> {
-		visit(visitor &v,double &ip) {
+		visit(visitor &v, double &ip) {
 			v.visit(ip);
 		}
 	};
