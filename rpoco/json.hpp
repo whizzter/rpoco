@@ -113,6 +113,20 @@ namespace rpoco {
 					return 0;
 				}
 			}
+			explicit operator double() const {
+				if (m_type == rpoco::vt_number) {
+					return data.n;
+				} else {
+					return 0;
+				}
+			}
+			explicit operator int() const {
+				if (m_type == rpoco::vt_number) {
+					return int(data.n);
+				} else {
+					return 0;
+				}
+			}
 			std::string to_string() {
 				if (m_type == rpoco::vt_string) {
 					return *data.s;
@@ -125,10 +139,26 @@ namespace rpoco {
 					return 0;
 				return data.o;
 			}
+			bool has(const std::string & key) {
+				if (m_type != rpoco::vt_object)
+					return false;
+				auto it = data.o->find(key);
+				return it != data.o->end();
+			}
+			value& operator[](const std::string & key) {
+				if (m_type != rpoco::vt_object)
+					return *(value*)nullptr;
+				return (*data.o)[key];
+			}
 			std::vector<rpoco::json::value>* array() {
 				if (m_type != rpoco::vt_array)
 					return 0;
 				return data.a;
+			}
+			value& operator[](int idx) {
+				if (m_type != rpoco::vt_array)
+					return *(value*)nullptr;
+				return (*data.a)[idx];
 			}
 			void set_type(rpoco::visit_type toType) {
 				if (m_type != toType) {
@@ -816,6 +846,13 @@ namespace rpoco {
 							tmp.push_back(ins->get());
 					}
 				}
+				virtual void visit(float &fv) {
+					// let the double visitor do the parsing then downconvert to a float
+					double tmp;
+					visit(tmp);
+					if (ok)
+						fv = (float)tmp;
+				}
 				// double number visitor
 				virtual void visit(double &dv) {
 					skip();
@@ -1119,6 +1156,10 @@ namespace rpoco {
 					out.append(bv ? "true" : "false");
 					// inform parent of value end
 					post();
+				}
+				virtual void visit(float &fv) {
+					double tmp = fv;
+					visit(tmp);
 				}
 				// double visitor
 				virtual void visit(double& dv) {
